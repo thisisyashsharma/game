@@ -173,7 +173,21 @@
   <div id="toast"></div>
 </div>
 
-<div class="panel" id="menu">
+<div class="panel hidden" id="profile-setup">
+  <div class="card">
+    <h1>CREATE <em>PROFILE</em></h1>
+    <p class="sub">Enter your student name to enter the system.</p>
+    <div style="margin:20px 0;">
+      <input type="text" id="profile-name-input" placeholder="e.g. Yash" maxlength="20" style="padding:10px; width:80%; font-family:inherit; font-weight:bold; font-size:16px; border:3px solid var(--ink); text-align:center;">
+      <p id="profile-error" style="color:var(--red-pen); font-size:12px; margin-top:8px; display:none;"></p>
+    </div>
+    <div class="btnrow">
+      <button id="btn-save-profile">REGISTER</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel hidden" id="menu">
   <div class="card">
     <h1>EXAM CHAOS <em>RUNNER</em></h1>
     <p class="sub">One student. Infinite bureaucracy. Outrun the system.</p>
@@ -192,6 +206,7 @@
     <h1>RESULT: <em>WITHHELD</em></h1>
     <div class="bigscore" id="final-score">0</div>
     <div class="verdict" id="verdict">—</div>
+    <p class="sub" id="gameover-player" style="font-weight:bold; color:var(--marker); margin-top:8px;"></p>
     <p class="sub" id="rank-line"></p>
     <div class="btnrow">
       <button id="btn-retry">↻ RE-ATTEMPT</button>
@@ -218,12 +233,33 @@
   <div class="card" id="asset-card">
     <h1>ASSET <em>MANAGER</em></h1>
     <div class="asset-tabs">
-      <button id="tab-head" class="active">HEAD</button>
+      <button id="tab-profile" class="active">PROFILE</button>
+      <button id="tab-head" class="ghost">HEAD</button>
       <button id="tab-img-obs" class="ghost">IMAGE OBSTACLES</button>
       <button id="tab-txt-obs" class="ghost">TEXT OBSTACLES</button>
     </div>
     
-    <div class="asset-section active" id="sec-head">
+    <div class="asset-section active" id="sec-profile">
+      <p class="muted" style="padding:0 0 10px 0; text-align:left;">Manage your student identity.</p>
+      
+      <div style="background:var(--paper); padding:15px; border:2px dashed var(--ink); margin-bottom:15px; text-align:center;">
+          <h2 style="font-size:24px; margin-bottom:5px;" id="disp-profile-name">Name</h2>
+          <p style="font-size:14px; opacity:0.7;">ID: #<span id="disp-profile-id">0000</span></p>
+      </div>
+
+      <div class="text-input-group" id="change-name-group" style="display:none; align-items:center;">
+          <input type="text" id="change-name-input" placeholder="New name (4-20 chars)" maxlength="20">
+          <button id="btn-confirm-name" class="ghost">SAVE</button>
+      </div>
+      <p id="change-name-error" style="color:var(--red-pen); font-size:12px; margin-bottom:10px; display:none;"></p>
+      
+      <div class="btnrow" style="margin-top:0;">
+          <button id="btn-change-name" class="ghost">Change Name</button>
+          <button id="btn-reset-profile" class="danger">Reset Profile</button>
+      </div>
+    </div>
+
+    <div class="asset-section" id="sec-head">
       <p class="muted" style="padding:0 0 10px 0; text-align:left;">Upload a custom image for the student's head. It will be auto-cropped.</p>
       <div class="file-input-wrapper">
         <label for="head-upload" class="file-upload-btn">Upload Head Image</label>
@@ -387,12 +423,44 @@ function uuidv4(){
   });
 }
 
-/* stable anonymous identity, generated once per browser */
-const PLAYER_ID   = store.get('player_id', null) || (()=>{ const id = uuidv4(); store.set('player_id', id); return id; })();
-const PLAYER_NAME = store.get('player_name', null) || (()=>{
-  const n = 'Student-' + PLAYER_ID.slice(0,4).toUpperCase();
-  store.set('player_name', n); return n;
-})();
+/* ═══════════════════════════════════════════════════════════════
+   2.1 PLAYER PROFILE SYSTEM
+   ═══════════════════════════════════════════════════════════════ */
+let PLAYER_ID = store.get('player_id', null);
+if (!PLAYER_ID) {
+    PLAYER_ID = uuidv4();
+    store.set('player_id', PLAYER_ID);
+}
+let PLAYER_NAME = store.get('player_name', null);
+
+function getDisplayName(name, id) {
+    if (!name || !id) return 'Unknown';
+    return name + ' #' + id.substring(0, 4).toUpperCase();
+}
+
+function validateProfileName(val) {
+    const trimmed = val.trim();
+    if (!trimmed) return "Name cannot be empty.";
+    if (trimmed.length < 4) return "Minimum 4 characters required.";
+    if (trimmed.length > 20) return "Maximum 20 characters allowed.";
+    if (!/^[a-zA-Z0-9\s]+$/.test(trimmed)) return "Letters, numbers, and spaces only.";
+    return null;
+}
+
+$('#btn-save-profile').addEventListener('click', () => {
+    const val = $('#profile-name-input').value;
+    const err = validateProfileName(val);
+    if (err) {
+        $('#profile-error').textContent = err;
+        $('#profile-error').style.display = 'block';
+    } else {
+        $('#profile-error').style.display = 'none';
+        PLAYER_NAME = val.trim();
+        store.set('player_name', PLAYER_NAME);
+        showPanel('#menu');
+    }
+});
+
 
 /* ═══════════════════════════════════════════════════════════════
    2.5 CUSTOM ASSET MANAGER (localStorage & Image Resizer)
@@ -978,7 +1046,7 @@ function toast(msg, ms=2600){
   toastTimer = setTimeout(()=>el.classList.remove('show'), ms);
 }
 function showPanel(id){
-  for (const p of ['#menu','#gameover','#leaderboard', '#customizer']) $(p).classList.add('hidden');
+  for (const p of ['#menu','#gameover','#leaderboard', '#customizer', '#profile-setup']) $(p).classList.add('hidden');
   if (id) $(id).classList.remove('hidden');
 }
 function verdictFor(score){
@@ -1026,6 +1094,7 @@ function gameOver(){
   if (s > G.hiScore){ G.hiScore = s; store.set('hiscore', s); }
   $('#final-score').textContent = s;
   $('#verdict').textContent = verdictFor(s);
+  $('#gameover-player').textContent = 'PLAYER: ' + getDisplayName(PLAYER_NAME, PLAYER_ID);
   $('#rank-line').textContent = 'Submitting to merit list…';
   showPanel('#gameover');
   Leaderboard.submit(s).then(rankText => { $('#rank-line').textContent = rankText; });
@@ -1324,7 +1393,7 @@ function primaryAction(){
   if (G.paused) return; // Disallow jumping when settings are open
   
   if (G.state === 'playing')  player.jump();
-  else if (G.state === 'menu' && $('#leaderboard').classList.contains('hidden') && $('#customizer').classList.contains('hidden')) startGame();
+  else if (G.state === 'menu' && $('#leaderboard').classList.contains('hidden') && $('#customizer').classList.contains('hidden') && $('#profile-setup').classList.contains('hidden')) startGame();
   else if (G.state === 'gameover'
         && $('#leaderboard').classList.contains('hidden')
         && $('#customizer').classList.contains('hidden')
@@ -1367,7 +1436,7 @@ const Leaderboard = (() => {
   function localScores(){ return store.get('local_scores', []); }
   function saveLocal(score){
     const list = localScores();
-    list.push({ score, date: new Date().toISOString().slice(0,10) });
+    list.push({ score, date: new Date().toISOString().slice(0,10), name: PLAYER_NAME, id: PLAYER_ID });
     list.sort((a,b) => b.score - a.score);
     store.set('local_scores', list.slice(0,100));
   }
@@ -1428,13 +1497,13 @@ const Leaderboard = (() => {
     try{
       const rows = await fetchTop100();
       list.innerHTML = rows.length
-        ? rows.map((r,i)=>rowHTML(i+1, r.name||'Anonymous', r.score, r.player_id===PLAYER_ID)).join('')
+        ? rows.map((r,i)=>rowHTML(i+1, getDisplayName(r.name, r.player_id), r.score, r.player_id===PLAYER_ID)).join('')
         : '<span class="muted">No scores yet. Be the first topper!</span>';
       const best = store.get('remote_best', 0);
       if (best > 0){
         const rank = await fetchRank(best);
-        $('#lb-mine').textContent = rank ? `You (${PLAYER_NAME}) — best ${best} — rank #${rank}` : '';
-      } else $('#lb-mine').textContent = `You are ${PLAYER_NAME}. Play a round to enter the list!`;
+        $('#lb-mine').textContent = rank ? `You (${getDisplayName(PLAYER_NAME, PLAYER_ID)}) — best ${best} — rank #${rank}` : '';
+      } else $('#lb-mine').textContent = `You are ${getDisplayName(PLAYER_NAME, PLAYER_ID)}. Play a round to enter the list!`;
     }catch(e){
       list.innerHTML = '<span class="muted">Could not reach the server.<br>The portal is, ironically, down.</span>';
     }
@@ -1443,7 +1512,7 @@ const Leaderboard = (() => {
   function renderLocal(){
     const rows = localScores();
     $('#lb-list').innerHTML = rows.length
-      ? rows.map((r,i)=>rowHTML(i+1, r.date, r.score, false)).join('')
+      ? rows.map((r,i)=>rowHTML(i+1, getDisplayName(r.name || PLAYER_NAME, r.id || PLAYER_ID), r.score, false)).join('')
       : '<span class="muted">No attempts yet. The exam awaits.</span>';
     $('#lb-mine').textContent = `Anonymous ID: ${PLAYER_ID.slice(0,8)}… (stored locally)`;
   }
@@ -1471,17 +1540,25 @@ const Leaderboard = (() => {
    ═══════════════════════════════════════════════════════════════ */
 // Tab Switching
 function switchAssetTab(targetId) {
-  ['#tab-head', '#tab-img-obs', '#tab-txt-obs'].forEach(id => {
+  ['#tab-profile', '#tab-head', '#tab-img-obs', '#tab-txt-obs'].forEach(id => {
       $(id).classList.remove('active');
       $(id).classList.add('ghost');
   });
-  ['#sec-head', '#sec-img-obs', '#sec-txt-obs'].forEach(id => {
+  ['#sec-profile', '#sec-head', '#sec-img-obs', '#sec-txt-obs'].forEach(id => {
       $(id).classList.remove('active');
   });
   $(`#tab-${targetId}`).classList.add('active');
   $(`#tab-${targetId}`).classList.remove('ghost');
   $(`#sec-${targetId}`).classList.add('active');
 }
+$('#tab-profile').addEventListener('click', () => {
+    switchAssetTab('profile');
+    $('#disp-profile-name').textContent = PLAYER_NAME;
+    $('#disp-profile-id').textContent = PLAYER_ID.substring(0,4).toUpperCase();
+    $('#change-name-group').style.display = 'none';
+    $('#change-name-error').style.display = 'none';
+    $('#btn-change-name').style.display = 'inline-block';
+});
 $('#tab-head').addEventListener('click', () => switchAssetTab('head'));
 $('#tab-img-obs').addEventListener('click', () => switchAssetTab('img-obs'));
 $('#tab-txt-obs').addEventListener('click', () => switchAssetTab('txt-obs'));
@@ -1497,6 +1574,10 @@ $('#btn-settings').addEventListener('click', () => {
   } else {
       $('#current-head-img').src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='; // empty
   }
+
+  // Set Profile defaults
+  $('#disp-profile-name').textContent = PLAYER_NAME;
+  $('#disp-profile-id').textContent = PLAYER_ID.substring(0,4).toUpperCase();
 });
 
 // Close Customizer
@@ -1507,6 +1588,41 @@ $('#btn-close-customizer').addEventListener('click', () => {
   } else {
       showPanel(G.state === 'gameover' ? '#gameover' : '#menu');
   }
+});
+
+// Change Name Logic
+$('#btn-change-name').addEventListener('click', () => {
+    $('#change-name-group').style.display = 'flex';
+    $('#change-name-input').value = PLAYER_NAME;
+    $('#btn-change-name').style.display = 'none';
+});
+
+$('#btn-confirm-name').addEventListener('click', () => {
+    const val = $('#change-name-input').value;
+    const err = validateProfileName(val);
+    if (err) {
+        $('#change-name-error').textContent = err;
+        $('#change-name-error').style.display = 'block';
+    } else {
+        PLAYER_NAME = val.trim();
+        store.set('player_name', PLAYER_NAME);
+        $('#disp-profile-name').textContent = PLAYER_NAME;
+        $('#change-name-group').style.display = 'none';
+        $('#change-name-error').style.display = 'none';
+        $('#btn-change-name').style.display = 'inline-block';
+    }
+});
+
+// Reset Profile Logic
+$('#btn-reset-profile').addEventListener('click', () => {
+    if (confirm("Are you sure? This will delete your current identity and scores. You will need to register again.")) {
+        localStorage.removeItem(CONFIG.storagePrefix + 'player_id');
+        localStorage.removeItem(CONFIG.storagePrefix + 'player_name');
+        localStorage.removeItem(CONFIG.storagePrefix + 'local_scores');
+        localStorage.removeItem(CONFIG.storagePrefix + 'hiscore');
+        localStorage.removeItem(CONFIG.storagePrefix + 'remote_best');
+        location.reload();
+    }
 });
 
 // Head Image Upload Logic
@@ -1602,6 +1718,12 @@ player.reset();
 /* hide tap hint on non-touch devices */
 if (!('ontouchstart' in window)) $('#taphint').style.display = 'none';
 booted = true;
+
+if (!PLAYER_NAME) {
+    showPanel('#profile-setup');
+} else {
+    showPanel('#menu');
+}
 </script>
 </body>
 </html>

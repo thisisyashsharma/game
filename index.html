@@ -1,2593 +1,2068 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    />
-    <meta name="theme-color" content="#12141d" />
-    <title>Exam Chaos Runner — Survive The System</title>
-    <meta
-      name="description"
-      content="An endless runner where a student outruns the Exam Chaos System. Jump over paper leaks, server crashes and last-minute rule changes."
-    />
-    <style>
-      /* ── design tokens ─────────────────────────────────────────── */
-      :root {
-        --ink: #12141d; /* deep notebook-ink navy            */
-        --paper: #f6efdf; /* answer-sheet cream                */
-        --marker: #ffd23f; /* highlighter yellow (signature)    */
-        --red-pen: #ef476f; /* correction red                    */
-        --board: #2ec4b6; /* chalkboard teal                   */
-        --hud-font: "Courier New", ui-monospace, Menlo, Consolas, monospace;
-      }
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      html,
-      body {
-        height: 100%;
-        overflow: hidden;
-      }
-      body {
-        background: var(--ink);
-        font-family: var(--hud-font);
-        color: var(--paper);
-        -webkit-user-select: none;
-        user-select: none;
-        -webkit-tap-highlight-color: transparent;
-        touch-action: manipulation;
-      }
-      #stage {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      }
-      canvas {
-        display: block;
-        width: 100%;
-        height: 100%;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
-      }
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#12141d">
+<title>Exam Chaos Runner — Survive The System</title>
+<meta name="description" content="An endless runner where a student outruns the Exam Chaos System. Jump over paper leaks, server crashes and last-minute rule changes.">
+<!--
+  ███████╗██╗  ██╗ █████╗ ███╗   ███╗     ██████╗██╗  ██╗ █████╗  ██████╗ ███████╗
+  EXAM CHAOS RUNNER  ·  single-file, offline-first, pixel-art endless runner
+  ─────────────────────────────────────────────────────────────────────────────
+  DEPLOY (GitHub Pages):
+    1. Put this file in a repo as index.html
+    2. Settings → Pages → Deploy from branch → main → / (root)
+    3. Done. No build step, no dependencies, loads in <1s.
 
-      /* ── HUD ───────────────────────────────────────────────────── */
-      #hud {
-        position: fixed;
-        inset: 0;
-        pointer-events: none;
-        font-weight: 700;
-      }
-      #hearts {
-        position: absolute;
-        top: 12px;
-        left: 14px;
-        display: flex;
-        gap: 6px;
-        filter: drop-shadow(0 2px 0 rgba(0, 0, 0, 0.45));
-      }
-      .heart {
-        width: 26px;
-        height: 24px;
-        transition: transform 0.15s;
-      }
-      .heart.lost {
-        filter: grayscale(1) brightness(0.5);
-        transform: scale(0.82);
-      }
-      #scorebox {
-        position: absolute;
-        top: 12px;
-        right: 64px;
-        text-align: right;
-        text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5);
-        letter-spacing: 1px;
-      } /* shifted left for gear icon */
-      #score {
-        font-size: clamp(18px, 3.4vw, 28px);
-        color: var(--marker);
-      }
-      #hiscore {
-        font-size: clamp(11px, 2vw, 14px);
-        opacity: 0.85;
-      }
-      #phase {
-        position: absolute;
-        top: 12px;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: clamp(10px, 1.8vw, 13px);
-        letter-spacing: 2px;
-        opacity: 0.75;
-        text-shadow: 1px 1px 0 rgba(0, 0, 0, 0.5);
-      }
+  OPTIONAL GLOBAL LEADERBOARD (Supabase):
+    1. Create a free project at supabase.com
+    2. Run this SQL in the SQL editor:
 
-      /* ── Customization Button ──────────────────────────────────── */
-      #btn-settings {
-        position: absolute;
-        top: 12px;
-        right: 14px;
-        width: clamp(34px, 5vw, 40px);
-        height: clamp(34px, 5vw, 40px);
-        border-radius: 8px;
-        background: var(--ink);
-        color: var(--marker);
-        border: 3px solid var(--marker);
-        font-size: clamp(18px, 3vw, 24px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        pointer-events: auto;
-        box-shadow: 2px 2px 0 var(--ink);
-        transition:
-          transform 0.08s,
-          box-shadow 0.08s;
-        z-index: 50;
-      }
-      #btn-settings:active {
-        transform: translate(2px, 2px);
-        box-shadow: 0 0 0 var(--ink);
-      }
+       create table public.scores (
+         player_id uuid primary key,
+         name      text not null default 'Anonymous Student',
+         score     integer not null default 0,
+         registered_at timestamptz not null default now(),
+         updated_at    timestamptz not null default now()
+       );
+       -- upgrading an existing table? run instead:
+       -- alter table public.scores add column if not exists
+       --   registered_at timestamptz not null default now();
+       alter table public.scores enable row level security;
+       create policy "public read"   on public.scores for select using (true);
+       create policy "public insert" on public.scores for insert with check (true);
+       create policy "public update" on public.scores for update using (true);
 
-      /* satire toast — the "system announcement" strip */
-      #toast {
-        position: absolute;
-        left: 50%;
-        top: 18%;
-        transform: translate(-50%, -8px);
-        background: var(--paper);
-        color: var(--ink);
-        border: 3px solid var(--ink);
-        box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.45);
-        padding: 9px 16px;
-        font-size: clamp(11px, 2.2vw, 15px);
-        font-weight: 700;
-        max-width: min(86vw, 560px);
-        text-align: center;
-        opacity: 0;
-        transition:
-          opacity 0.25s,
-          transform 0.25s;
-      }
-      #toast.show {
-        opacity: 1;
-        transform: translate(-50%, 0);
-      }
-      #toast::before {
-        content: "⚠ OFFICIAL NOTICE";
-        display: block;
-        font-size: 9px;
-        letter-spacing: 3px;
-        color: var(--red-pen);
-        margin-bottom: 3px;
-      }
+    3. Paste your project URL + anon key into CONFIG.supabase below.
+       If left empty, the game silently falls back to the local leaderboard.
 
-      /* ── full-screen panels (menu / game over / leaderboard) ───── */
-      .panel {
-        position: fixed;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 14px;
-        text-align: center;
-        padding: 22px;
-        background: rgba(10, 12, 20, 0.72);
-        backdrop-filter: blur(3px);
-        opacity: 1;
-        transition: opacity 0.25s;
-        z-index: 100;
-      }
-      .panel.hidden {
-        opacity: 0;
-        pointer-events: none;
-      }
-      .card {
-        background: var(--paper);
-        color: var(--ink);
-        border: 4px solid var(--ink);
-        box-shadow: 8px 8px 0 rgba(0, 0, 0, 0.5);
-        padding: clamp(18px, 4vw, 34px) clamp(20px, 5vw, 44px);
-        max-width: min(92vw, 620px);
-        width: 100%;
-        position: relative;
-      }
-      .card h1 {
-        font-size: clamp(22px, 5vw, 40px);
-        line-height: 1.05;
-        letter-spacing: 1px;
-      }
-      .card h1 em {
-        font-style: normal;
-        background: var(--marker);
-        padding: 0 6px;
-        box-shadow: 2px 2px 0 var(--ink);
-      }
-      .card .sub {
-        margin-top: 8px;
-        font-size: clamp(11px, 2.2vw, 14px);
-        opacity: 0.8;
-      }
-      .bigscore {
-        font-size: clamp(30px, 7vw, 54px);
-        color: var(--red-pen);
-        margin: 6px 0;
-        text-shadow: 2px 2px 0 rgba(0, 0, 0, 0.15);
-      }
-      .verdict {
-        font-size: clamp(11px, 2.4vw, 15px);
-        background: var(--ink);
-        color: var(--paper);
-        display: inline-block;
-        padding: 5px 12px;
-        margin-top: 4px;
-      }
-      .keys {
-        margin-top: 12px;
-        font-size: clamp(10px, 2vw, 13px);
-        opacity: 0.7;
-      }
-      .btnrow {
-        display: flex;
-        gap: 12px;
-        justify-content: center;
-        flex-wrap: wrap;
-        margin-top: 18px;
-      }
-      button {
-        font-family: inherit;
-        font-weight: 700;
-        font-size: clamp(12px, 2.4vw, 16px);
-        padding: 12px 22px;
-        cursor: pointer;
-        letter-spacing: 1px;
-        background: var(--marker);
-        color: var(--ink);
-        border: 3px solid var(--ink);
-        box-shadow: 4px 4px 0 var(--ink);
-        transition:
-          transform 0.08s,
-          box-shadow 0.08s;
-      }
-      button:active {
-        transform: translate(3px, 3px);
-        box-shadow: 1px 1px 0 var(--ink);
-      }
-      button.ghost {
-        background: var(--paper);
-      }
-      button.danger {
-        background: var(--red-pen);
-        color: var(--paper);
-      }
-      button:focus-visible {
-        outline: 3px dashed var(--red-pen);
-        outline-offset: 3px;
-      }
+  CUSTOM ART / SOUNDS:
+    Every sprite ships as built-in procedural pixel art so the game works with
+    zero assets. To use your own PNGs / audio, drop URLs into CONFIG.assets —
+    any entry left as null keeps the built-in art.
 
-      /* ── leaderboard ───────────────────────────────────────────── */
-      #lb-card {
-        max-height: 86vh;
-        display: flex;
-        flex-direction: column;
-      }
-      #lb-tabs {
-        display: flex;
-        gap: 8px;
-        justify-content: center;
-        margin: 10px 0;
-      }
-      #lb-tabs button {
-        padding: 8px 14px;
-        font-size: 12px;
-      }
-      #lb-tabs button.active {
-        background: var(--board);
-        color: #fff;
-      }
-      #lb-list {
-        overflow-y: auto;
-        text-align: left;
-        font-size: clamp(11px, 2.2vw, 14px);
-        border: 3px solid var(--ink);
-        background: #fff;
-        min-height: 120px;
-        max-height: 46vh;
-      }
-      .lb-row {
-        display: flex;
-        gap: 10px;
-        padding: 7px 12px;
-        border-bottom: 1px dashed #bbb;
-      }
-      .lb-row.me {
-        background: var(--marker);
-      }
-      .lb-rank {
-        width: 44px;
-        flex: none;
-        color: var(--red-pen);
-        font-weight: 700;
-      }
-      .lb-name {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .lb-score {
-        flex: none;
-        font-weight: 700;
-      }
-      #lb-mine {
-        margin-top: 10px;
-        font-size: clamp(11px, 2.2vw, 14px);
-      }
-      .muted {
-        opacity: 0.6;
-        font-size: 12px;
-        padding: 14px;
-        display: block;
-        text-align: center;
-      }
+  IN-GAME CUSTOMIZATION (⚙ button, top-right):
+    Players can also upload a custom head image, unlimited image obstacles,
+    and unlimited text obstacles at runtime — no code edits needed. These are
+    stored as data-URLs/strings in localStorage and restored after refresh.
+-->
+<style>
+  /* ── design tokens ─────────────────────────────────────────── */
+  :root{
+    --ink:#12141d;          /* deep notebook-ink navy            */
+    --paper:#f6efdf;        /* answer-sheet cream                */
+    --marker:#ffd23f;       /* highlighter yellow (signature)    */
+    --red-pen:#ef476f;      /* correction red                    */
+    --board:#2ec4b6;        /* chalkboard teal                   */
+    --hud-font:'Courier New',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%;overflow:hidden}
+  body{
+    background:var(--ink);
+    font-family:var(--hud-font);
+    color:var(--paper);
+    -webkit-user-select:none;user-select:none;
+    -webkit-tap-highlight-color:transparent;
+    touch-action:manipulation;
+  }
+  #stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+  canvas{display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges}
 
-      /* ── Asset Manager Modal ───────────────────────────────────── */
-      #asset-card {
-        max-height: 90vh;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        padding-bottom: 20px;
-      }
-      .asset-tabs {
-        display: flex;
-        gap: 8px;
-        justify-content: center;
-        margin: 15px 0;
-        flex-wrap: wrap;
-      }
-      .asset-tabs button {
-        padding: 8px 12px;
-        font-size: 12px;
-      }
-      .asset-tabs button.active {
-        background: var(--board);
-        color: #fff;
-      }
-      .asset-section {
-        flex: 1;
-        overflow-y: auto;
-        text-align: left;
-        background: #fff;
-        border: 3px solid var(--ink);
-        padding: 15px;
-        margin-bottom: 15px;
-        display: none;
-      }
-      .asset-section.active {
-        display: block;
-      }
+  /* ── HUD ───────────────────────────────────────────────────── */
+  #hud{position:fixed;inset:0;pointer-events:none;font-weight:700}
+  #hearts{position:absolute;top:12px;left:14px;display:flex;gap:6px;filter:drop-shadow(0 2px 0 rgba(0,0,0,.45))}
+  .heart{width:26px;height:24px;transition:transform .15s}
+  .heart.lost{filter:grayscale(1) brightness(.5);transform:scale(.82)}
+  #scorebox{position:absolute;top:12px;right:66px;text-align:right;text-shadow:2px 2px 0 rgba(0,0,0,.5);letter-spacing:1px}
+  #score{font-size:clamp(18px,3.4vw,28px);color:var(--marker)}
+  #hiscore{font-size:clamp(11px,2vw,14px);opacity:.85}
+  #phase{position:absolute;top:12px;left:50%;transform:translateX(-50%);
+    font-size:clamp(10px,1.8vw,13px);letter-spacing:2px;opacity:.75;text-shadow:1px 1px 0 rgba(0,0,0,.5)}
 
-      .file-input-wrapper {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 15px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .file-input-wrapper input[type="file"] {
-        display: none;
-      }
-      .file-upload-btn {
-        background: var(--marker);
-        padding: 8px 15px;
-        border: 2px solid var(--ink);
-        cursor: pointer;
-        font-weight: bold;
-        font-size: 14px;
-        box-shadow: 3px 3px 0 var(--ink);
-        transition: transform 0.1s;
-      }
-      .file-upload-btn:active {
-        transform: translate(2px, 2px);
-        box-shadow: 1px 1px 0 var(--ink);
-      }
-      .text-input-group {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 15px;
-      }
-      .text-input-group input[type="text"] {
-        flex: 1;
-        padding: 8px;
-        border: 2px solid var(--ink);
-        font-family: var(--hud-font);
-        font-size: 14px;
-        font-weight: bold;
-      }
+  /* satire toast — the "system announcement" strip */
+  #toast{
+    position:absolute;left:50%;top:18%;transform:translate(-50%,-8px);
+    background:var(--paper);color:var(--ink);
+    border:3px solid var(--ink);box-shadow:5px 5px 0 rgba(0,0,0,.45);
+    padding:9px 16px;font-size:clamp(11px,2.2vw,15px);font-weight:700;
+    max-width:min(86vw,560px);text-align:center;
+    opacity:0;transition:opacity .25s,transform .25s;
+  }
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+  #toast::before{content:'⚠ OFFICIAL NOTICE';display:block;font-size:9px;letter-spacing:3px;color:var(--red-pen);margin-bottom:3px}
 
-      .preview-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-        gap: 15px;
-      }
-      .preview-item {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 5px;
-        background: var(--paper);
-        padding: 5px;
-        border: 2px dashed var(--ink);
-        position: relative;
-      }
-      .preview-item img {
-        width: 100%;
-        height: auto;
-        object-fit: contain;
-        aspect-ratio: 1;
-        image-rendering: pixelated;
-        border: 1px solid var(--ink);
-        background: #eee;
-      }
-      .preview-item .signboard {
-        width: 100%;
-        aspect-ratio: 4/3;
-        background: var(--marker);
-        border: 2px solid var(--ink);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        font-weight: bold;
-        font-size: 10px;
-        word-break: break-all;
-        padding: 2px;
-      }
-      .del-btn {
-        background: var(--red-pen);
-        color: #fff;
-        border: 2px solid var(--ink);
-        padding: 2px 5px;
-        font-size: 10px;
-        cursor: pointer;
-        width: 100%;
-        font-family: var(--hud-font);
-        font-weight: bold;
-      }
+  /* ── full-screen panels (menu / game over / leaderboard) ───── */
+  .panel{
+    position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;text-align:center;padding:22px;
+    background:rgba(10,12,20,.72);backdrop-filter:blur(3px);
+    opacity:1;transition:opacity .25s;
+  }
+  .panel.hidden{opacity:0;pointer-events:none}
+  .card{
+    background:var(--paper);color:var(--ink);
+    border:4px solid var(--ink);box-shadow:8px 8px 0 rgba(0,0,0,.5);
+    padding:clamp(18px,4vw,34px) clamp(20px,5vw,44px);
+    max-width:min(92vw,620px);width:100%;
+  }
+  .card h1{font-size:clamp(22px,5vw,40px);line-height:1.05;letter-spacing:1px}
+  .card h1 em{font-style:normal;background:var(--marker);padding:0 6px;box-shadow:2px 2px 0 var(--ink)}
+  .card .sub{margin-top:8px;font-size:clamp(11px,2.2vw,14px);opacity:.8}
+  .bigscore{font-size:clamp(30px,7vw,54px);color:var(--red-pen);margin:6px 0;text-shadow:2px 2px 0 rgba(0,0,0,.15)}
+  .verdict{font-size:clamp(11px,2.4vw,15px);background:var(--ink);color:var(--paper);display:inline-block;padding:5px 12px;margin-top:4px}
+  .keys{margin-top:12px;font-size:clamp(10px,2vw,13px);opacity:.7}
+  .btnrow{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:18px}
+  button{
+    font-family:inherit;font-weight:700;font-size:clamp(12px,2.4vw,16px);
+    padding:12px 22px;cursor:pointer;letter-spacing:1px;
+    background:var(--marker);color:var(--ink);
+    border:3px solid var(--ink);box-shadow:4px 4px 0 var(--ink);
+    transition:transform .08s,box-shadow .08s;
+  }
+  button:active{transform:translate(3px,3px);box-shadow:1px 1px 0 var(--ink)}
+  button.ghost{background:var(--paper)}
+  button:focus-visible{outline:3px dashed var(--red-pen);outline-offset:3px}
 
-      #head-preview-container {
-        display: flex;
-        align-items: center;
-        gap: 15px;
-        margin-top: 15px;
-      }
-      #current-head-img {
-        width: 60px;
-        height: 60px;
-        object-fit: cover;
-        border: 3px solid var(--ink);
-        background: #eee;
-      }
+  /* ── leaderboard ───────────────────────────────────────────── */
+  #lb-card{max-height:86vh;display:flex;flex-direction:column}
+  #lb-tabs{display:flex;gap:8px;justify-content:center;margin:10px 0;flex-wrap:wrap}
+  #lb-tabs button{padding:8px 14px;font-size:12px}
+  #lb-tabs button.active{background:var(--board);color:#fff}
+  #lb-list{overflow-y:auto;text-align:left;font-size:clamp(11px,2.2vw,14px);
+    border:3px solid var(--ink);background:#fff;min-height:120px;max-height:46vh}
+  .lb-row{display:flex;gap:10px;padding:7px 12px;border-bottom:1px dashed #bbb}
+  .lb-row.me{background:var(--marker)}
+  .lb-rank{width:44px;flex:none;color:var(--red-pen);font-weight:700}
+  .lb-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lb-score{flex:none;font-weight:700}
+  #lb-mine{margin-top:10px;font-size:clamp(11px,2.2vw,14px)}
+  .muted{opacity:.6;font-size:12px;padding:14px;display:block;text-align:center}
 
-      /* tap hint pulses on touch devices */
-      #taphint {
-        position: absolute;
-        bottom: 9%;
-        left: 50%;
-        transform: translateX(-50%);
-        font-size: 12px;
-        letter-spacing: 2px;
-        opacity: 0.6;
-        animation: pulse 1.4s infinite;
-      }
-      @keyframes pulse {
-        50% {
-          opacity: 0.15;
-        }
-      }
-      @media (prefers-reduced-motion: reduce) {
-        * {
-          animation: none !important;
-          transition: none !important;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <div id="stage"><canvas id="game"></canvas></div>
+  /* ── customization: gear button + asset manager panel ─────── */
+  #btn-gear{position:fixed;top:10px;right:12px;z-index:5;width:44px;height:44px;
+    padding:0;font-size:20px;line-height:1;background:var(--paper)}
+  #cz-card{max-height:88vh;overflow-y:auto;text-align:left}
+  #cz-card h1{text-align:center}
+  .cz-section{margin-top:16px;border-top:2px dashed #b9b092;padding-top:12px}
+  .cz-section h2{font-size:clamp(11px,2.2vw,14px);letter-spacing:2px;color:var(--red-pen);margin-bottom:8px}
+  .cz-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .cz-preview{width:72px;height:72px;flex:none;border:3px solid var(--ink);background:#fff;
+    display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .cz-preview img{width:100%;height:100%;object-fit:cover;image-rendering:pixelated}
+  .cz-preview .muted{font-size:9px;padding:4px}
+  .cz-actions{display:flex;flex-direction:column;gap:8px}
+  .cz-hint{font-size:10px;opacity:.6;margin-top:8px}
+  .cz-grid{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;min-height:30px}
+  .cz-thumb{position:relative;width:64px;height:64px;border:3px solid var(--ink);background:#fff}
+  .cz-thumb img{width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+  .cz-del{position:absolute;top:-10px;right:-10px;width:24px;height:24px;padding:0;
+    font-size:11px;line-height:1;background:var(--red-pen);color:#fff;box-shadow:2px 2px 0 var(--ink)}
+  .cz-list{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;min-height:26px}
+  .cz-chip{display:inline-flex;align-items:center;gap:6px;background:#fff;
+    border:2px solid var(--ink);padding:5px 10px;font-weight:700;font-size:12px;color:var(--ink)}
+  .cz-chip .cz-del{position:static;width:20px;height:20px;font-size:10px;box-shadow:none}
+  #cz-text-input,#cz-rtext-input,#cz-name-input,#name-input{flex:1;min-width:150px;font-family:inherit;font-weight:700;font-size:13px;
+    padding:10px;border:3px solid var(--ink);background:#fff;color:var(--ink)}
+  #cz-text-input:focus-visible,#cz-rtext-input:focus-visible,#cz-name-input:focus-visible,#name-input:focus-visible{outline:3px dashed var(--red-pen);outline-offset:2px}
+  #name-input{flex:none;width:min(60vw,240px)}
 
-    <div id="hud">
-      <div id="hearts"></div>
-      <div id="scorebox">
-        <div id="score">0</div>
-        <div id="hiscore">BEST 0</div>
+  /* sound settings */
+  .cz-check{display:flex;gap:8px;align-items:center;font-size:12px;font-weight:700;cursor:pointer}
+  .cz-check input{width:18px;height:18px;accent-color:var(--red-pen);cursor:pointer}
+  .cz-check input:focus-visible{outline:3px dashed var(--red-pen);outline-offset:2px}
+  #snd-volume{flex:1;min-width:120px;accent-color:var(--red-pen);cursor:pointer}
+  .cz-sndgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
+  .cz-sndgrid .cz-check{background:#fff;border:2px solid var(--ink);padding:7px 10px}
+  .cz-sndgrid .cz-check.off{opacity:.5}
+
+  /* tap hint pulses on touch devices */
+  #taphint{position:absolute;bottom:9%;left:50%;transform:translateX(-50%);
+    font-size:12px;letter-spacing:2px;opacity:.6;animation:pulse 1.4s infinite}
+  @keyframes pulse{50%{opacity:.15}}
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<div id="stage"><canvas id="game"></canvas></div>
+
+<!-- ── heads-up display ──────────────────────────────────────── -->
+<div id="hud">
+  <div id="hearts"></div>
+  <div id="scorebox">
+    <div id="score">0</div>
+    <div id="hiscore">BEST 0</div>
+  </div>
+  <div id="phase"></div>
+  <div id="toast"></div>
+</div>
+
+<!-- ── start menu ────────────────────────────────────────────── -->
+<div class="panel" id="menu">
+  <div class="card">
+    <h1>EXAM CHAOS <em>RUNNER</em></h1>
+    <p class="sub">One student. Infinite bureaucracy. Outrun the system.</p>
+    <div class="btnrow">
+      <button id="btn-start">▶ START EXAM</button>
+      <button id="btn-lb" class="ghost">🏆 LEADERBOARD</button>
+    </div>
+    <p class="keys">SPACE / ↑ / TAP to jump · double-jump enabled<br>
+    ❤×3 · dodge notices, grab admit cards</p>
+  </div>
+  <div id="taphint">TAP ANYWHERE TO JUMP</div>
+</div>
+
+<!-- ── game over ─────────────────────────────────────────────── -->
+<div class="panel hidden" id="gameover">
+  <div class="card">
+    <h1>RESULT: <em>WITHHELD</em></h1>
+    <div class="bigscore" id="final-score">0</div>
+    <div class="verdict" id="verdict">—</div>
+    <p class="sub" id="rank-line"></p>
+    <div class="btnrow">
+      <button id="btn-retry">↻ RE-ATTEMPT</button>
+      <button id="btn-lb2" class="ghost">🏆 LEADERBOARD</button>
+    </div>
+    <p class="keys">Press SPACE to re-attempt (no re-exam fee)</p>
+  </div>
+</div>
+
+<!-- ── leaderboard ───────────────────────────────────────────── -->
+<div class="panel hidden" id="leaderboard">
+  <div class="card" id="lb-card">
+    <h1>MERIT <em>LIST</em></h1>
+    <div id="lb-tabs">
+      <button id="tab-global" class="active">GLOBAL TOP 20</button>
+      <button id="tab-new" class="ghost">NEW STUDENTS</button>
+      <button id="tab-local" class="ghost">MY ATTEMPTS</button>
+    </div>
+    <div id="lb-list"><span class="muted">Loading merit list…</span></div>
+    <div id="lb-mine"></div>
+    <div class="btnrow">
+      <button id="btn-export" class="ghost">⬇ EXPORT DATA</button>
+      <button id="btn-close-lb" class="ghost">✕ CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── student registration (first visit — min 4-letter name) ── -->
+<div class="panel hidden" id="namegate">
+  <div class="card">
+    <h1>STUDENT <em>REGISTRATION</em></h1>
+    <p class="sub">Enter your name to compete on the global Top 20 merit list.<br>
+       A unique anonymous ID is attached automatically — no account needed.</p>
+    <div class="cz-row" style="justify-content:center;margin-top:16px">
+      <input id="name-input" maxlength="16" placeholder="At least 4 letters"
+             autocomplete="off" spellcheck="false">
+      <button id="name-submit">✓ REGISTER</button>
+    </div>
+    <p class="keys" id="name-error" style="color:var(--red-pen)"></p>
+    <p class="keys">Roll No: <span id="name-uuid"></span> (auto-generated, stays on this device)</p>
+  </div>
+</div>
+
+<!-- ── customization gear (top-right corner; hidden while playing) ── -->
+<button id="btn-gear" aria-label="Open customization" title="Customization">⚙</button>
+
+<!-- ── customization / asset manager ─────────────────────────── -->
+<div class="panel hidden" id="customize">
+  <div class="card" id="cz-card">
+    <h1>CUSTOM<em>IZATION</em></h1>
+
+    <!-- section 0: player name (synced to the global leaderboard) -->
+    <div class="cz-section" style="border-top:none;margin-top:10px;padding-top:0">
+      <h2>PLAYER NAME</h2>
+      <div class="cz-row">
+        <input id="cz-name-input" maxlength="16" placeholder="At least 4 letters"
+               autocomplete="off" spellcheck="false">
+        <button id="cz-name-save" class="ghost">✓ SAVE</button>
       </div>
-      <button id="btn-settings" title="Customize">⚙</button>
-      <div id="phase"></div>
-      <div id="toast"></div>
+      <p class="cz-hint" id="cz-name-hint"></p>
     </div>
 
-    <div class="panel hidden" id="profile-setup">
-      <div class="card">
-        <h1>ENTER YOUR <em>NAME</em></h1>
-        <div style="margin: 20px 0">
-          <input
-            type="text"
-            id="profile-name-input"
-            placeholder="Your Name"
-            maxlength="20"
-            style="
-              padding: 10px;
-              width: 80%;
-              font-family: inherit;
-              font-weight: bold;
-              font-size: 16px;
-              border: 3px solid var(--ink);
-              text-align: center;
-            "
-          />
-          <p
-            id="profile-error"
-            style="
-              color: var(--red-pen);
-              font-size: 12px;
-              margin-top: 8px;
-              display: none;
-            "
-          ></p>
-        </div>
-        <div class="btnrow">
-          <button id="btn-save-profile">CONTINUE</button>
+    <!-- section 1: player head -->
+    <div class="cz-section">
+      <h2>1 · CURRENT HEAD IMAGE</h2>
+      <div class="cz-row">
+        <div id="cz-head-preview" class="cz-preview"></div>
+        <div class="cz-actions">
+          <button id="cz-head-btn" class="ghost">⬆ UPLOAD HEAD</button>
+          <button id="cz-head-clear" class="ghost">✕ REMOVE</button>
         </div>
       </div>
+      <p class="cz-hint">PNG · JPG · WEBP — any size, auto-cropped onto the student's head</p>
     </div>
 
-    <div class="panel hidden" id="menu">
-      <div class="card">
-        <h1>EXAM CHAOS <em>RUNNER</em></h1>
-        <p class="sub">One student. Infinite bureaucracy. Outrun the system.</p>
-        <div class="btnrow">
-          <button id="btn-start">▶ START EXAM</button>
-          <button id="btn-lb" class="ghost">🏆 LEADERBOARD</button>
-        </div>
-        <p class="keys">
-          SPACE / ↑ / TAP to jump · double-jump enabled<br />
-          ❤×3 · dodge notices, grab admit cards
-        </p>
+    <!-- section 2: uploaded image obstacles -->
+    <div class="cz-section">
+      <h2>2 · IMAGE OBSTACLES</h2>
+      <div id="cz-img-grid" class="cz-grid"></div>
+      <button id="cz-obs-btn" class="ghost">⬆ UPLOAD OBSTACLE IMAGE</button>
+      <p class="cz-hint">Any size — scaled into a framed card and mixed with built-in obstacles</p>
+    </div>
+
+    <!-- section 3: text obstacles -->
+    <div class="cz-section">
+      <h2>3 · TEXT OBSTACLES</h2>
+      <div id="cz-text-list" class="cz-list"></div>
+      <div class="cz-row">
+        <input id="cz-text-input" maxlength="24" placeholder="e.g. RETEST, 404, POSTPONED"
+               autocomplete="off" spellcheck="false">
+        <button id="cz-text-add">+ ADD</button>
       </div>
-      <div id="taphint">TAP ANYWHERE TO JUMP</div>
+      <p class="cz-hint">Rendered on a signboard — font auto-scales to fit</p>
     </div>
 
-    <div class="panel hidden" id="gameover">
-      <div class="card">
-        <h1>RESULT: <em>WITHHELD</em></h1>
-        <div class="bigscore" id="final-score">0</div>
-        <div class="verdict" id="verdict">—</div>
-        <p
-          class="sub"
-          id="gameover-player"
-          style="font-weight: bold; color: var(--marker); margin-top: 8px"
-        ></p>
-        <p class="sub" id="rank-line"></p>
-        <div class="btnrow">
-          <button id="btn-retry">↻ RE-ATTEMPT</button>
-          <button id="btn-lb2" class="ghost">🏆 LEADERBOARD</button>
-        </div>
-        <p class="keys">Press SPACE to re-attempt (no re-exam fee)</p>
+    <!-- section 4: custom rewards (collectibles) -->
+    <div class="cz-section">
+      <h2>4 · REWARDS (COLLECTIBLES)</h2>
+      <div id="cz-rimg-grid" class="cz-grid"></div>
+      <div id="cz-rtext-list" class="cz-list"></div>
+      <div class="cz-row">
+        <button id="cz-rimg-btn" class="ghost">⬆ UPLOAD REWARD IMAGE</button>
       </div>
-    </div>
-
-    <div class="panel hidden" id="leaderboard">
-      <div class="card" id="lb-card">
-        <h1>MERIT <em>LIST</em></h1>
-        <div id="lb-tabs">
-          <button id="tab-global" class="active">GLOBAL TOP 100</button>
-          <button id="tab-local" class="ghost">MY ATTEMPTS</button>
-        </div>
-        <div id="lb-list"><span class="muted">Loading merit list…</span></div>
-        <div id="lb-mine"></div>
-        <div class="btnrow">
-          <button id="btn-close-lb" class="ghost">✕ CLOSE</button>
-        </div>
+      <div class="cz-row" style="margin-top:10px">
+        <input id="cz-rtext-input" maxlength="24" placeholder="Text or emoji — e.g. 🍕, A+, CHAI"
+               autocomplete="off" spellcheck="false">
+        <button id="cz-rtext-add">+ ADD</button>
       </div>
+      <p class="cz-hint">Mixed with built-in collectibles · each grants +40 points when grabbed</p>
     </div>
 
-    <div class="panel hidden" id="customizer">
-      <div class="card" id="asset-card">
-        <h1>ASSET <em>MANAGER</em></h1>
-        <div class="asset-tabs">
-          <button id="tab-profile" class="active">PROFILE</button>
-          <button id="tab-head" class="ghost">HEAD</button>
-          <button id="tab-img-obs" class="ghost">IMAGE OBSTACLES</button>
-          <button id="tab-txt-obs" class="ghost">TEXT OBSTACLES</button>
-        </div>
-
-        <div class="asset-section active" id="sec-profile">
-          <p class="muted" style="padding: 0 0 10px 0; text-align: left">
-            Manage your student identity.
-          </p>
-
-          <div
-            style="
-              background: var(--paper);
-              padding: 15px;
-              border: 2px dashed var(--ink);
-              margin-bottom: 15px;
-              text-align: center;
-            "
-          >
-            <h2
-              style="font-size: 24px; margin-bottom: 5px"
-              id="disp-profile-name"
-            >
-              Name
-            </h2>
-          </div>
-
-          <div
-            class="text-input-group"
-            id="change-name-group"
-            style="display: none; align-items: center"
-          >
-            <input
-              type="text"
-              id="change-name-input"
-              placeholder="New name (4-20 chars)"
-              maxlength="20"
-            />
-            <button id="btn-confirm-name" class="ghost">SAVE</button>
-          </div>
-          <p
-            id="change-name-error"
-            style="
-              color: var(--red-pen);
-              font-size: 12px;
-              margin-bottom: 10px;
-              display: none;
-            "
-          ></p>
-
-          <div class="btnrow" style="margin-top: 0">
-            <button id="btn-change-name" class="ghost">Change Name</button>
-            <button id="btn-reset-profile" class="danger">Reset Profile</button>
-          </div>
-        </div>
-
-        <div class="asset-section" id="sec-head">
-          <p class="muted" style="padding: 0 0 10px 0; text-align: left">
-            Upload a custom image for the student's head. It will be
-            auto-cropped.
-          </p>
-          <div class="file-input-wrapper">
-            <label for="head-upload" class="file-upload-btn"
-              >Upload Head Image</label
-            >
-            <input
-              type="file"
-              id="head-upload"
-              accept="image/png, image/jpeg, image/webp"
-            />
-          </div>
-          <div id="head-preview-container">
-            <img
-              id="current-head-img"
-              src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="
-              alt="Head"
-            />
-            <button id="head-clear" class="danger">✕ Remove</button>
-          </div>
-        </div>
-
-        <div class="asset-section" id="sec-img-obs">
-          <p class="muted" style="padding: 0 0 10px 0; text-align: left">
-            Upload custom images to act as random obstacles.
-          </p>
-          <div class="file-input-wrapper">
-            <label for="img-obs-upload" class="file-upload-btn"
-              >+ Add Image Obstacles</label
-            >
-            <input
-              type="file"
-              id="img-obs-upload"
-              accept="image/png, image/jpeg, image/webp"
-              multiple
-            />
-          </div>
-          <div class="preview-grid" id="img-obs-grid"></div>
-        </div>
-
-        <div class="asset-section" id="sec-txt-obs">
-          <p class="muted" style="padding: 0 0 10px 0; text-align: left">
-            Create custom signboards with text. (e.g. "404", "RETEST")
-          </p>
-          <div class="text-input-group">
-            <input
-              type="text"
-              id="txt-obs-input"
-              placeholder="Enter obstacle text..."
-              maxlength="15"
-            />
-            <button id="txt-obs-add" class="ghost">ADD</button>
-          </div>
-          <div class="preview-grid" id="txt-obs-grid"></div>
-        </div>
-
-        <div class="btnrow">
-          <button id="btn-close-customizer" class="ghost">✕ CLOSE</button>
-        </div>
+    <!-- section 5: sound settings -->
+    <div class="cz-section">
+      <h2>5 · SOUND</h2>
+      <label class="cz-check" id="snd-master-row">
+        <input type="checkbox" id="snd-master"> 🔊 SOUND ON
+        <span class="cz-hint" style="margin:0">(uncheck for full silent mode)</span>
+      </label>
+      <div class="cz-row" style="margin:10px 0">
+        <span style="font-size:11px;letter-spacing:1px">VOLUME</span>
+        <input type="range" id="snd-volume" min="0" max="100" step="5"
+               aria-label="Sound volume">
+        <span id="snd-volume-val" style="font-size:11px;width:38px;text-align:right">80%</span>
       </div>
+      <div id="snd-toggles" class="cz-sndgrid"></div>
+      <p class="cz-hint">Turn each sound on/off individually — a preview plays when enabled</p>
     </div>
 
-    <script>
-      "use strict";
-      /* ═══════════════════════════════════════════════════════════════
+    <div class="btnrow"><button id="btn-close-cz" class="ghost">✕ CLOSE</button></div>
+
+    <!-- hidden pickers triggered by the buttons above -->
+    <input type="file" id="cz-head-file" accept="image/png,image/jpeg,image/webp" hidden>
+    <input type="file" id="cz-obs-file"  accept="image/png,image/jpeg,image/webp" multiple hidden>
+    <input type="file" id="cz-rimg-file" accept="image/png,image/jpeg,image/webp" multiple hidden>
+  </div>
+</div>
+
+<script>
+'use strict';
+/* ═══════════════════════════════════════════════════════════════
    1. CONFIG — everything you'd want to reskin lives here.
       Any asset left as null uses the built-in pixel art / synth SFX.
    ═══════════════════════════════════════════════════════════════ */
-      const CONFIG = {
-        assets: {
-          /* PNG sprite sheet replacements (URLs or data-URIs). Sizes are
+const CONFIG = {
+
+  assets: {
+    /* PNG sprite sheet replacements (URLs or data-URIs). Sizes are
        flexible — sprites are drawn at the hitbox sizes defined in
        `gameplay` below and pixel-scaled automatically. */
-          characterPNG: null, // full body, 2-frame run strip optional (see note in drawPlayer)
-          headPNG: null, // optional separate head (drawn on top of body if provided)
-          obstaclePNGs: {
-            // one per obstacle id
-            paperLeak: null,
-            serverCrash: null,
-            postponement: null,
-            ruleChange: null,
-            fakeNotif: null,
-            docError: null,
-          },
-          collectiblePNGs: {
-            admitCard: null,
-            coin: null,
-            notes: null,
-            energyDrink: null,
-          },
-          backgroundPNGs: {
-            // optional parallax layers (drawn behind procedural sky)
-            far: null,
-            near: null,
-          },
-          sounds: {
-            // audio file URLs; null = built-in WebAudio synth
-            jump: null,
-            hit: null,
-            collect: null,
-            heart: null,
-            gameover: null,
-          },
-        },
+    characterPNG : null,   // full body, 2-frame run strip optional (see note in drawPlayer)
+    headPNG      : null,   // optional separate head (drawn on top of body if provided)
+    obstaclePNGs : {       // one per obstacle id
+      paperLeak      : null,
+      serverCrash    : null,
+      postponement   : null,
+      ruleChange     : null,
+      fakeNotif      : null,
+      docError       : null,
+    },
+    collectiblePNGs : {
+      admitCard   : null,
+      coin        : null,
+      notes       : null,
+      energyDrink : null,
+    },
+    backgroundPNGs : {     // optional parallax layers (drawn behind procedural sky)
+      far  : null,
+      near : null,
+    },
+    sounds : {             // audio file URLs; null = built-in WebAudio synth
+      jump    : null,
+      hit     : null,
+      collect : null,
+      heart   : null,
+      gameover: null,
+    },
+  },
 
-        /* satire strings — add/remove freely */
-        messages: {
-          ambient: [
-            "Server Busy. Try Again Tomorrow.",
-            "Notification Updated Again.",
-            "Please Upload The Same Document Again.",
-            "Exam Rescheduled For Administrative Reasons.",
-            "Application Rejected Due To Missing Screenshot.",
-            "Portal Under Maintenance (Since 2019).",
-            "Answer Key Revised. Again.",
-            "Result Declared. Result Withdrawn.",
-            "Fee Paid Twice. Refund In 90 Working Days.",
-            "Syllabus Changed 12 Hours Before Exam.",
-          ],
-          onHit: [
-            "Objection Noted. Objection Ignored.",
-            "Kindly Contact Helpline (Always Busy).",
-            "Your Grievance Has Been Forwarded To Nobody.",
-            "Technical Glitch. Marks Deducted Anyway.",
-          ],
-          onCollect: {
-            admitCard: "Admit Card Found! (+1 ❤)",
-            coin: "Scholarship Credited! (+50)",
-            notes: "Topper's Notes Acquired (+25)",
-            energyDrink: "CAFFEINE SHIELD ACTIVATED!",
-          },
-          verdicts: [
-            // picked by final score band on the game-over card
-            [0, "Verdict: Please Re-Register."],
-            [300, "Verdict: Waitlisted."],
-            [800, "Verdict: Provisionally Passed*"],
-            [1500, "Verdict: District Topper (Unverified)."],
-            [3000, "Verdict: THE SYSTEM FEARS YOU."],
-          ],
-        },
+  /* satire strings — add/remove freely */
+  messages : {
+    ambient : [
+      "Server Busy. Try Again Tomorrow.",
+      "Notification Updated Again.",
+      "Please Upload The Same Document Again.",
+      "Exam Rescheduled For Administrative Reasons.",
+      "Application Rejected Due To Missing Screenshot.",
+      "Portal Under Maintenance (Since 2019).",
+      "Answer Key Revised. Again.",
+      "Result Declared. Result Withdrawn.",
+      "Fee Paid Twice. Refund In 90 Working Days.",
+      "Syllabus Changed 12 Hours Before Exam.",
+    ],
+    onHit : [
+      "Objection Noted. Objection Ignored.",
+      "Kindly Contact Helpline (Always Busy).",
+      "Your Grievance Has Been Forwarded To Nobody.",
+      "Technical Glitch. Marks Deducted Anyway.",
+    ],
+    onCollect : {
+      admitCard   : "Admit Card Found! (+1 ❤)",
+      coin        : "Scholarship Credited! (+50)",
+      notes       : "Topper's Notes Acquired (+25)",
+      energyDrink : "CAFFEINE SHIELD ACTIVATED!",
+    },
+    verdicts : [   // picked by final score band on the game-over card
+      [0,    "Verdict: Please Re-Register."],
+      [300,  "Verdict: Waitlisted."],
+      [800,  "Verdict: Provisionally Passed*"],
+      [1500, "Verdict: District Topper (Unverified)."],
+      [3000, "Verdict: THE SYSTEM FEARS YOU."],
+    ],
+  },
 
-        /* gameplay tuning */
-        gameplay: {
-          baseSpeed: 330, // px/sec at start
-          maxSpeed: 760, // px/sec ceiling
-          accelPerSec: 5.5, // speed gained per second survived
-          gravity: 2500, // px/s²
-          jumpVelocity: -840, // initial jump impulse
-          doubleJump: true,
-          maxHearts: 3,
-          invincibleTime: 1.6, // seconds of i-frames after a hit
-          boostTime: 3.5, // energy-drink shield duration
-          dayCycleDist: 2600, // px of distance per full day/night cycle
-          obstacleGapMin: 0.85, // seconds between spawns (scales down with speed)
-          obstacleGapMax: 1.9,
-          collectEvery: [3.5, 7], // seconds between collectible spawns [min,max]
-          toastEvery: [7, 13], // seconds between ambient satire toasts
-        },
+  /* gameplay tuning */
+  gameplay : {
+    baseSpeed      : 330,    // px/sec at start
+    maxSpeed       : 760,    // px/sec ceiling
+    accelPerSec    : 5.5,    // speed gained per second survived
+    gravity        : 2500,   // px/s²
+    jumpVelocity   : -840,   // initial jump impulse
+    doubleJump     : true,
+    maxHearts      : 3,
+    invincibleTime : 1.6,    // seconds of i-frames after a hit
+    boostTime      : 3.5,    // energy-drink shield duration
+    dayCycleDist   : 2600,   // px of distance per full day/night cycle
+    obstacleGapMin : 0.85,   // seconds between spawns (scales down with speed)
+    obstacleGapMax : 1.9,
+    collectEvery   : [3.5, 7],  // seconds between collectible spawns [min,max]
+    toastEvery     : [7, 13],   // seconds between ambient satire toasts
+  },
 
-        /* leaderboard backend — leave url empty to stay 100% offline/local */
-        supabase: {
-          url: "", // e.g. "https://abcd1234.supabase.co"
-          anonKey: "", // project anon public key
-          table: "scores",
-        },
+  /* leaderboard backend — leave url empty to stay 100% offline/local */
+  supabase : {
+    url    : "",           // e.g. "https://abcd1234.supabase.co"
+    anonKey: "",           // project anon public key
+    table  : "scores",
+  },
 
-        storagePrefix: "examchaos_", // localStorage namespace
-      };
+  storagePrefix : "examchaos_",   // localStorage namespace
+};
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    2. TINY HELPERS
    ═══════════════════════════════════════════════════════════════ */
-      const $ = (s) => document.querySelector(s);
-      const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-      const lerp = (a, b, t) => a + (b - a) * t;
-      const rand = (a, b) => a + Math.random() * (b - a);
-      const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+const $  = s => document.querySelector(s);
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const lerp  = (a,b,t) => a + (b-a)*t;
+const rand  = (a,b) => a + Math.random()*(b-a);
+const pick  = arr => arr[(Math.random()*arr.length)|0];
 
-      /* namespaced localStorage that never throws (private mode etc.) */
-      const store = {
-        get(k, fallback) {
-          try {
-            const v = localStorage.getItem(CONFIG.storagePrefix + k);
-            return v === null ? fallback : JSON.parse(v);
-          } catch (e) {
-            return fallback;
-          }
-        },
-        set(k, v) {
-          try {
-            localStorage.setItem(CONFIG.storagePrefix + k, JSON.stringify(v));
-          } catch (e) {}
-        },
-      };
+/* namespaced localStorage that never throws (private mode etc.) */
+const store = {
+  get(k, fallback){ try{ const v = localStorage.getItem(CONFIG.storagePrefix+k); return v===null? fallback : JSON.parse(v);}catch(e){ return fallback; } },
+  set(k, v){ try{ localStorage.setItem(CONFIG.storagePrefix+k, JSON.stringify(v)); }catch(e){} },
+};
 
-      /* RFC4122-ish v4 UUID (crypto if available) */
-      function uuidv4() {
-        if (crypto && crypto.randomUUID) return crypto.randomUUID();
-        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-          const r = (Math.random() * 16) | 0,
-            v = c === "x" ? r : (r & 0x3) | 0x8;
-          return v.toString(16);
-        });
-      }
+/* RFC4122-ish v4 UUID (crypto if available) */
+function uuidv4(){
+  if (crypto && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c=>{
+    const r = Math.random()*16|0, v = c==='x'? r : (r&0x3|0x8);
+    return v.toString(16);
+  });
+}
 
-      /* ═══════════════════════════════════════════════════════════════
-   2.1 PLAYER PROFILE SYSTEM
-   ═══════════════════════════════════════════════════════════════ */
-      let PLAYER_ID = store.get("player_id", null);
-      if (!PLAYER_ID) {
-        PLAYER_ID = uuidv4();
-        store.set("player_id", PLAYER_ID);
-      }
-      let PLAYER_NAME = store.get("player_name", null);
+/* stable anonymous identity, generated once per browser.
+   PLAYER_NAME is mutable — set via the registration form on first visit
+   (min 4 letters) and editable later from the ⚙ customization panel.  */
+const PLAYER_ID = store.get('player_id', null) || (()=>{ const id = uuidv4(); store.set('player_id', id); return id; })();
+let PLAYER_NAME = store.get('player_name', null) || (()=>{
+  const n = 'Student-' + PLAYER_ID.slice(0,4).toUpperCase();
+  store.set('player_name', n); return n;
+})();
 
-      function getDisplayName(name, id) {
-        if (!name) return "Unknown";
-        return name; // Suffix removed for cleaner leaderboard display
-      }
+/* validate a display name: 4–16 chars, at least 4 letters */
+function validName(raw){
+  const n = raw.trim().replace(/\s+/g, ' ').slice(0, 16);
+  const letters = (n.match(/[A-Za-z]/g) || []).length;
+  return (n.length >= 4 && letters >= 4) ? n : null;
+}
+function setPlayerName(n){
+  PLAYER_NAME = n;
+  store.set('player_name', n);
+  store.set('name_set', true);          // gate never shows again
+  if (!store.get('registered_at', null))
+    store.set('registered_at', new Date().toISOString());  // first-registration date
+}
 
-      function validateProfileName(val) {
-        const trimmed = val.trim();
-        if (!trimmed) return "Name cannot be empty.";
-        if (trimmed.length < 4) return "Minimum 4 characters required.";
-        if (trimmed.length > 20) return "Maximum 20 characters allowed.";
-        if (!/^[a-zA-Z0-9\s]+$/.test(trimmed))
-          return "Letters, numbers, and spaces only.";
-        return null;
-      }
-
-      function saveInitialProfile() {
-        const val = $("#profile-name-input").value;
-        const err = validateProfileName(val);
-        if (err) {
-          $("#profile-error").textContent = err;
-          $("#profile-error").style.display = "block";
-        } else {
-          $("#profile-error").style.display = "none";
-          PLAYER_NAME = val.trim();
-          store.set("player_name", PLAYER_NAME);
-          showPanel("#menu");
-        }
-      }
-
-      $("#btn-save-profile").addEventListener("click", saveInitialProfile);
-      $("#profile-name-input").addEventListener("keydown", (e) => {
-        if (e.key === "Enter") saveInitialProfile();
-      });
-      /* ═══════════════════════════════════════════════════════════════
-   2.5 CUSTOM ASSET MANAGER (localStorage & Image Resizer)
-   ═══════════════════════════════════════════════════════════════ */
-      // State for custom assets loaded from localStorage
-      const CUSTOM_ASSETS = store.get("custom_assets", {
-        head: null,
-        imgObs: [],
-        textObs: [],
-      });
-
-      // Runtime image objects to avoid recreating images every frame
-      const RUNTIME_ASSETS = {
-        headImg: new Image(),
-        imgObsImgs: [],
-      };
-
-      // Sync arrays on boot
-      if (CUSTOM_ASSETS.head) RUNTIME_ASSETS.headImg.src = CUSTOM_ASSETS.head;
-      CUSTOM_ASSETS.imgObs.forEach((dataUrl) => {
-        const img = new Image();
-        img.src = dataUrl;
-        RUNTIME_ASSETS.imgObsImgs.push(img);
-      });
-
-      // Helper: Resize and compress image to avoid QuotaExceededError in localStorage
-      function resizeImageFile(file, maxWidth, maxHeight, callback) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const img = new Image();
-          img.onload = () => {
-            const canvas = document.createElement("canvas");
-            let w = img.width,
-              h = img.height;
-            // Calculate scale to fit within bounds
-            const ratio = Math.min(maxWidth / w, maxHeight / h);
-            if (ratio < 1) {
-              w *= ratio;
-              h *= ratio;
-            }
-            canvas.width = w;
-            canvas.height = h;
-            const ctx = canvas.getContext("2d");
-            ctx.drawImage(img, 0, 0, w, h);
-            callback(canvas.toDataURL("image/webp", 0.8));
-          };
-          img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-      }
-
-      // Helper: Save current custom assets to storage
-      function saveCustomAssets() {
-        store.set("custom_assets", CUSTOM_ASSETS);
-      }
-
-      // Draw image preserving aspect ratio & auto-cropping center
-      function drawCropped(ctx, img, x, y, w, h) {
-        if (!img.complete || img.width === 0) return;
-        const aspectCanvas = w / h;
-        const aspectImg = img.width / img.height;
-        let srcX = 0,
-          srcY = 0,
-          srcW = img.width,
-          srcH = img.height;
-        if (aspectImg > aspectCanvas) {
-          srcW = img.height * aspectCanvas;
-          srcX = (img.width - srcW) / 2;
-        } else {
-          srcH = img.width / aspectCanvas;
-          srcY = (img.height - srcH) / 2;
-        }
-        ctx.drawImage(img, srcX, srcY, srcW, srcH, x, y, w, h);
-      }
-
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    3. SOUND — WebAudio synth fallbacks; swaps to <audio> when a URL
       is supplied in CONFIG.assets.sounds. All lazy so the page
       loads instantly and audio unlocks on first input.
    ═══════════════════════════════════════════════════════════════ */
-      const SFX = (() => {
-        let ctx = null;
-        const files = {}; // preloaded <audio> elements for custom sounds
-        for (const [name, url] of Object.entries(CONFIG.assets.sounds)) {
-          if (url) {
-            const a = new Audio(url);
-            a.preload = "auto";
-            files[name] = a;
-          }
-        }
-        const ensure = () => {
-          if (!ctx)
-            ctx = new (window.AudioContext || window.webkitAudioContext)();
-          if (ctx.state === "suspended") ctx.resume();
-        };
+const SFX = (() => {
+  let ctx = null;
+  const files = {};              // preloaded <audio> elements for custom sounds
+  for (const [name,url] of Object.entries(CONFIG.assets.sounds)){
+    if (url){ const a = new Audio(url); a.preload = 'auto'; files[name] = a; }
+  }
 
-        /* generic little synth blip */
-        function tone({
-          freq = 440,
-          end = freq,
-          dur = 0.12,
-          type = "square",
-          vol = 0.16,
-          delay = 0,
-        }) {
-          ensure();
-          const t0 = ctx.currentTime + delay;
-          const osc = ctx.createOscillator(),
-            g = ctx.createGain();
-          osc.type = type;
-          osc.frequency.setValueAtTime(freq, t0);
-          osc.frequency.exponentialRampToValueAtTime(
-            Math.max(30, end),
-            t0 + dur,
-          );
-          g.gain.setValueAtTime(vol, t0);
-          g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-          osc.connect(g).connect(ctx.destination);
-          osc.start(t0);
-          osc.stop(t0 + dur + 0.02);
-        }
-        function play(name) {
-          if (files[name]) {
-            files[name].currentTime = 0;
-            files[name].play().catch(() => {});
-            return;
-          }
-          try {
-            switch (name) {
-              case "jump":
-                tone({ freq: 300, end: 640, dur: 0.13 });
-                break;
-              case "hit":
-                tone({
-                  freq: 220,
-                  end: 70,
-                  dur: 0.22,
-                  type: "sawtooth",
-                  vol: 0.2,
-                });
-                break;
-              case "collect":
-                tone({ freq: 660, end: 660, dur: 0.07 });
-                tone({ freq: 990, end: 990, dur: 0.1, delay: 0.07 });
-                break;
-              case "heart":
-                tone({ freq: 523, dur: 0.09 });
-                tone({ freq: 659, dur: 0.09, delay: 0.09 });
-                tone({ freq: 784, dur: 0.14, delay: 0.18 });
-                break;
-              case "gameover":
-                tone({
-                  freq: 392,
-                  end: 98,
-                  dur: 0.6,
-                  type: "triangle",
-                  vol: 0.22,
-                });
-                break;
-            }
-          } catch (e) {
-            /* audio blocked — game continues silently */
-          }
-        }
-        return {
-          play,
-          unlock: () => {
-            try {
-              ensure();
-            } catch (e) {}
-          },
-        };
-      })();
+  /* sound preferences — master switch (silent mode), volume, and a
+     per-event toggle for every SFX. Persisted + restored via `store`. */
+  const prefs = Object.assign(
+    { master:true, volume:0.8, jump:true, hit:true, collect:true, heart:true, gameover:true },
+    store.get('sound_prefs', {})
+  );
+  function setPref(key, val){ prefs[key] = val; store.set('sound_prefs', prefs); }
 
-      /* ═══════════════════════════════════════════════════════════════
+  const ensure = () => { if(!ctx) ctx = new (window.AudioContext||window.webkitAudioContext)(); if(ctx.state==='suspended') ctx.resume(); };
+
+  /* generic little synth blip (scaled by the user volume setting) */
+  function tone({freq=440, end=freq, dur=.12, type='square', vol=.16, delay=0}){
+    ensure();
+    const t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(30,end), t0+dur);
+    g.gain.setValueAtTime(Math.max(.0001, vol * prefs.volume), t0);
+    g.gain.exponentialRampToValueAtTime(.0001, t0+dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0); osc.stop(t0+dur+.02);
+  }
+  function play(name){
+    if (!prefs.master || prefs[name] === false) return;   // silent mode / per-event off
+    if (files[name]){
+      files[name].volume = prefs.volume;
+      files[name].currentTime = 0;
+      files[name].play().catch(()=>{});
+      return;
+    }
+    try{
+      switch(name){
+        case 'jump'    : tone({freq:300,end:640,dur:.13}); break;
+        case 'hit'     : tone({freq:220,end:70, dur:.22,type:'sawtooth',vol:.2}); break;
+        case 'collect' : tone({freq:660,end:660,dur:.07}); tone({freq:990,end:990,dur:.1,delay:.07}); break;
+        case 'heart'   : tone({freq:523,dur:.09}); tone({freq:659,dur:.09,delay:.09}); tone({freq:784,dur:.14,delay:.18}); break;
+        case 'gameover': tone({freq:392,end:98,dur:.6,type:'triangle',vol:.22}); break;
+      }
+    }catch(e){ /* audio blocked — game continues silently */ }
+  }
+  return { play, prefs, setPref, unlock: () => { try{ensure();}catch(e){} } };
+})();
+
+/* ═══════════════════════════════════════════════════════════════
    4. PIXEL SPRITES — string-grid art rendered once to offscreen
       canvases. Replaceable per-sprite via CONFIG.assets PNG urls.
    ═══════════════════════════════════════════════════════════════ */
-      function makeSprite(rows, palette, scale = 3) {
-        const w = rows[0].length,
-          h = rows.length;
-        const c = document.createElement("canvas");
-        c.width = w * scale;
-        c.height = h * scale;
-        const g = c.getContext("2d");
-        for (let y = 0; y < h; y++)
-          for (let x = 0; x < w; x++) {
-            const col = palette[rows[y][x]];
-            if (!col) continue;
-            g.fillStyle = col;
-            g.fillRect(x * scale, y * scale, scale, scale);
-          }
-        return c;
-      }
-      /* if a PNG url is configured, load it; else use the procedural canvas */
-      function blankCanvas() {
-        const c = document.createElement("canvas");
-        c.width = c.height = 1;
-        return c;
-      }
-      function spriteOr(url, canvas) {
-        if (!url) return canvas;
-        const img = new Image();
-        img.src = url; // draws once loaded; canvas fallback until then
-        img._fallback = canvas && canvas.width ? canvas : blankCanvas(); // never 0×0 (drawImage throws)
-        return img;
-      }
-      const drawable = (s) =>
-        s instanceof HTMLImageElement && !s.complete ? s._fallback : s;
+function makeSprite(rows, palette, scale=3){
+  const w = rows[0].length, h = rows.length;
+  const c = document.createElement('canvas');
+  c.width = w*scale; c.height = h*scale;
+  const g = c.getContext('2d');
+  for (let y=0;y<h;y++) for (let x=0;x<w;x++){
+    const col = palette[rows[y][x]];
+    if (!col) continue;
+    g.fillStyle = col;
+    g.fillRect(x*scale, y*scale, scale, scale);
+  }
+  return c;
+}
+/* if a PNG url is configured, load it; else use the procedural canvas */
+function blankCanvas(){ const c = document.createElement('canvas'); c.width = c.height = 1; return c; }
+function spriteOr(url, canvas){
+  if (!url) return canvas;
+  const img = new Image();
+  img.src = url;               // draws once loaded; canvas fallback until then
+  img._fallback = canvas && canvas.width ? canvas : blankCanvas();  // never 0×0 (drawImage throws)
+  return img;
+}
+const drawable = s => (s instanceof HTMLImageElement && !s.complete) ? s._fallback : s;
 
-      /* ---- palettes ---- */
-      const P_STUDENT = {
-        k: "#33261c",
-        s: "#f2c28b",
-        e: "#1b1b1b",
-        b: "#3572d6",
-        d: "#2a5cb0",
-        r: "#e2504c",
-        n: "#2e3440",
-        w: "#f5f6fa",
-        y: "#ffd23f",
-      };
-      const P_MISC = {
-        W: "#fdfdf5",
-        G: "#c9c19f",
-        R: "#ef476f",
-        B: "#3572d6",
-        D: "#12141d",
-        Y: "#ffd23f",
-        O: "#f78c2a",
-        T: "#2ec4b6",
-        L: "#8fd14f",
-        M: "#9b5de5",
-        S: "#cfd8e3",
-        E: "#5a646f",
-      };
+/* ---- palettes ---- */
+const P_STUDENT = {k:'#33261c', s:'#f2c28b', e:'#1b1b1b', b:'#3572d6', d:'#2a5cb0',
+                   r:'#e2504c', n:'#2e3440', w:'#f5f6fa', y:'#ffd23f'};
+const P_MISC    = {W:'#fdfdf5', G:'#c9c19f', R:'#ef476f', B:'#3572d6', D:'#12141d',
+                   Y:'#ffd23f', O:'#f78c2a', T:'#2ec4b6', L:'#8fd14f', M:'#9b5de5',
+                   S:'#cfd8e3', E:'#5a646f'};
 
-      /* ---- student: two run frames + jump frame (14×21) ---- */
-      const STUDENT_ROWS_A = [
-        "...kkkkkk.....",
-        "..kkkkkkkk....",
-        "..kssssssk....",
-        "..ksesse.k....",
-        "..kssssss.....",
-        "...ssss.......",
-        "..rbbbbbb.....",
-        ".rrbbbbbbs....",
-        ".rrbbbbbbss...",
-        ".rrbbbbbb.....",
-        ".rrdbbbbd.....",
-        "...bbbbbb.....",
-        "...nnnnnn.....",
-        "...nn..nn.....",
-        "..nn....nn....",
-        ".nn......nn...",
-        ".nn.......nn..",
-        "ww.........ww.",
-        "ww.........ww.",
-        "..............",
-        "..............",
-      ];
-      const STUDENT_ROWS_B = [
-        "...kkkkkk.....",
-        "..kkkkkkkk....",
-        "..kssssssk....",
-        "..ksesse.k....",
-        "..kssssss.....",
-        "...ssss.......",
-        "..rbbbbbb.....",
-        ".rrbbbbbbs....",
-        ".rrbbbbbbss...",
-        ".rrbbbbbb.....",
-        ".rrdbbbbd.....",
-        "...bbbbbb.....",
-        "...nnnnnn.....",
-        "...nnnnn......",
-        "....nn.nn.....",
-        "....nn..nn....",
-        "...nn....nn...",
-        "...ww....ww...",
-        "...ww....ww...",
-        "..............",
-        "..............",
-      ];
-      const STUDENT_ROWS_JUMP = [
-        "...kkkkkk.....",
-        "..kkkkkkkk....",
-        "..kssssssk....",
-        "..ksesse.k....",
-        "..kssssss.....",
-        "...ssss....s..",
-        "..rbbbbbbss...",
-        ".rrbbbbbbs....",
-        ".rrbbbbbb.....",
-        ".rrbbbbbb.....",
-        ".rrdbbbbd.....",
-        "...bbbbbb.....",
-        "...nnnnnn.....",
-        "..nn....nn....",
-        ".nn......nn...",
-        ".ww......ww...",
-        "..............",
-        "..............",
-        "..............",
-        "..............",
-        "..............",
-      ];
+/* ---- student: two run frames + jump frame (14×21) ---- */
+const STUDENT_ROWS_A = [
+"...kkkkkk.....",
+"..kkkkkkkk....",
+"..kssssssk....",
+"..ksesse.k....",
+"..kssssss.....",
+"...ssss.......",
+"..rbbbbbb.....",
+".rrbbbbbbs....",
+".rrbbbbbbss...",
+".rrbbbbbb.....",
+".rrdbbbbd.....",
+"...bbbbbb.....",
+"...nnnnnn.....",
+"...nn..nn.....",
+"..nn....nn....",
+".nn......nn...",
+".nn.......nn..",
+"ww.........ww.",
+"ww.........ww.",
+"..............",
+"..............",
+];
+const STUDENT_ROWS_B = [
+"...kkkkkk.....",
+"..kkkkkkkk....",
+"..kssssssk....",
+"..ksesse.k....",
+"..kssssss.....",
+"...ssss.......",
+"..rbbbbbb.....",
+".rrbbbbbbs....",
+".rrbbbbbbss...",
+".rrbbbbbb.....",
+".rrdbbbbd.....",
+"...bbbbbb.....",
+"...nnnnnn.....",
+"...nnnnn......",
+"....nn.nn.....",
+"....nn..nn....",
+"...nn....nn...",
+"...ww....ww...",
+"...ww....ww...",
+"..............",
+"..............",
+];
+const STUDENT_ROWS_JUMP = [
+"...kkkkkk.....",
+"..kkkkkkkk....",
+"..kssssssk....",
+"..ksesse.k....",
+"..kssssss.....",
+"...ssss....s..",
+"..rbbbbbbss...",
+".rrbbbbbbs....",
+".rrbbbbbb.....",
+".rrbbbbbb.....",
+".rrdbbbbd.....",
+"...bbbbbb.....",
+"...nnnnnn.....",
+"..nn....nn....",
+".nn......nn...",
+".ww......ww...",
+"..............",
+"..............",
+"..............",
+"..............",
+"..............",
+];
 
-      /* ---- obstacles ---- */
-      const OB_ART = {
-        /* 1. Paper Leak Envelope — manila envelope, red LEAK seal */
-        paperLeak: makeSprite(
-          [
-            "YYYYYYYYYYYYYYYY",
-            "YOOOOOOOOOOOOOOY",
-            "YO.OOOOOOOOOO.OY",
-            "YOO.OOOOOOOO.OOY",
-            "YOOO.OOOOOO.OOOY",
-            "YOOOO.RRRR.OOOOY",
-            "YOOOOORRRROOOOOY",
-            "YOOOOORRRROOOOOY",
-            "YOOOOO.RR.OOOOOY",
-            "YOOOOOOOOOOOOOOY",
-            "YYYYYYYYYYYYYYYY",
-          ],
-          { Y: "#caa14a", O: "#e8bc60", R: "#ef476f", ".": "#b98f3e" },
-        ),
+/* ---- obstacles ---- */
+const OB_ART = {
+  /* 1. Paper Leak Envelope — manila envelope, red LEAK seal */
+  paperLeak: makeSprite([
+"YYYYYYYYYYYYYYYY",
+"YOOOOOOOOOOOOOOY",
+"YO.OOOOOOOOOO.OY",
+"YOO.OOOOOOOO.OOY",
+"YOOO.OOOOOO.OOOY",
+"YOOOO.RRRR.OOOOY",
+"YOOOOORRRROOOOOY",
+"YOOOOORRRROOOOOY",
+"YOOOOO.RR.OOOOOY",
+"YOOOOOOOOOOOOOOY",
+"YYYYYYYYYYYYYYYY",
+  ], {Y:'#caa14a', O:'#e8bc60', R:'#ef476f', '.':'#b98f3e'}),
 
-        /* 2. Server Crash Screen — monitor with blue screen of dread */
-        serverCrash: makeSprite(
-          [
-            ".DDDDDDDDDDDDDD.",
-            ".DBBBBBBBBBBBBD.",
-            ".DBWW.BBBB.WWBD.",
-            ".DBBBBBBBBBBBBD.",
-            ".DBB.WWWWWW.BBD.",
-            ".DBBBBBBBBBBBBD.",
-            ".DBW.BBBBBB.WBD.",
-            ".DBBWWWWWWWWBBD.",
-            ".DDDDDDDDDDDDDD.",
-            "......DDD.......",
-            "....DDDDDDD.....",
-          ],
-          { D: "#12141d", B: "#2456c4", W: "#fdfdf5" },
-        ),
+  /* 2. Server Crash Screen — monitor with blue screen of dread */
+  serverCrash: makeSprite([
+".DDDDDDDDDDDDDD.",
+".DBBBBBBBBBBBBD.",
+".DBWW.BBBB.WWBD.",
+".DBBBBBBBBBBBBD.",
+".DBB.WWWWWW.BBD.",
+".DBBBBBBBBBBBBD.",
+".DBW.BBBBBB.WBD.",
+".DBBWWWWWWWWBBD.",
+".DDDDDDDDDDDDDD.",
+"......DDD.......",
+"....DDDDDDD.....",
+  ], {D:'#12141d', B:'#2456c4', W:'#fdfdf5'}),
 
-        /* 3. Exam Postponement Notice — pinned paper with red stamp */
-        postponement: makeSprite(
-          [
-            "....RR....RR....",
-            ".WWWWWWWWWWWWWW.",
-            ".WDDDDDDDDDDDDW.",
-            ".WWWWWWWWWWWWWW.",
-            ".WDDDDDD.WWWWWW.",
-            ".WWWWWWWWWWWWWW.",
-            ".WDDDDDDDDDD.WW.",
-            ".WWWWRRRRRWWWWW.",
-            ".WWWWRRRRRWWWWW.",
-            ".WWWWWWWWWWWWWW.",
-            ".WWWWWWWWWWWWWW.",
-          ],
-          { W: "#fdfdf5", D: "#5a646f", R: "#ef476f" },
-        ),
+  /* 3. Exam Postponement Notice — pinned paper with red stamp */
+  postponement: makeSprite([
+"....RR....RR....",
+".WWWWWWWWWWWWWW.",
+".WDDDDDDDDDDDDW.",
+".WWWWWWWWWWWWWW.",
+".WDDDDDD.WWWWWW.",
+".WWWWWWWWWWWWWW.",
+".WDDDDDDDDDD.WW.",
+".WWWWRRRRRWWWWW.",
+".WWWWRRRRRWWWWW.",
+".WWWWWWWWWWWWWW.",
+".WWWWWWWWWWWWWW.",
+  ], {W:'#fdfdf5', D:'#5a646f', R:'#ef476f'}),
 
-        /* 4. Last Minute Rule Change — clipboard with a big ! */
-        ruleChange: makeSprite(
-          [
-            ".....EEEE.......",
-            "..TTTEEEETTT....",
-            "..TWWWWWWWWT....",
-            "..TWWWRRWWWT....",
-            "..TWWWRRWWWT....",
-            "..TWWWRRWWWT....",
-            "..TWWWWWWWWT....",
-            "..TWWWRRWWWT....",
-            "..TWWWWWWWWT....",
-            "..TTTTTTTTTT....",
-            "................",
-          ],
-          { T: "#2ec4b6", W: "#fdfdf5", R: "#ef476f", E: "#5a646f" },
-        ),
+  /* 4. Last Minute Rule Change — clipboard with a big ! */
+  ruleChange: makeSprite([
+".....EEEE.......",
+"..TTTEEEETTT....",
+"..TWWWWWWWWT....",
+"..TWWWRRWWWT....",
+"..TWWWRRWWWT....",
+"..TWWWRRWWWT....",
+"..TWWWWWWWWT....",
+"..TWWWRRWWWT....",
+"..TWWWWWWWWT....",
+"..TTTTTTTTTT....",
+"................",
+  ], {T:'#2ec4b6', W:'#fdfdf5', R:'#ef476f', E:'#5a646f'}),
 
-        /* 5. Fake Notification Alert — flying bell with a red badge */
-        fakeNotif: makeSprite(
-          [
-            "......YY........",
-            ".....YYYY.......",
-            "....YYYYYY..RR..",
-            "...YYYYYYYY.RR..",
-            "...YYYYYYYY.....",
-            "..YYYYYYYYYY....",
-            "..YYYYYYYYYY....",
-            ".YYYYYYYYYYYY...",
-            ".OOOOOOOOOOOO...",
-            "......YY........",
-            "................",
-          ],
-          { Y: "#ffd23f", O: "#f78c2a", R: "#ef476f" },
-        ),
+  /* 5. Fake Notification Alert — flying bell with a red badge */
+  fakeNotif: makeSprite([
+"......YY........",
+".....YYYY.......",
+"....YYYYYY..RR..",
+"...YYYYYYYY.RR..",
+"...YYYYYYYY.....",
+"..YYYYYYYYYY....",
+"..YYYYYYYYYY....",
+".YYYYYYYYYYYY...",
+".OOOOOOOOOOOO...",
+"......YY........",
+"................",
+  ], {Y:'#ffd23f', O:'#f78c2a', R:'#ef476f'}),
 
-        /* 6. Documentation Error — folder with a red ✕ */
-        docError: makeSprite(
-          [
-            ".SSSSS..........",
-            ".SSSSSSSSSSSSS..",
-            ".SEEEEEEEEEEES..",
-            ".SER.EEEEE.RES..",
-            ".SEER.EEE.REES..",
-            ".SEEER.E.REEES..",
-            ".SEEEE.R.EEEES..",
-            ".SEEER.E.REEES..",
-            ".SEER.EEE.REES..",
-            ".SER.EEEEE.RES..",
-            ".SSSSSSSSSSSSS..",
-          ],
-          { S: "#cfd8e3", E: "#8d99a6", R: "#ef476f" },
-        ),
-      };
+  /* 6. Documentation Error — folder with a red ✕ */
+  docError: makeSprite([
+".SSSSS..........",
+".SSSSSSSSSSSSS..",
+".SEEEEEEEEEEES..",
+".SER.EEEEE.RES..",
+".SEER.EEE.REES..",
+".SEEER.E.REEES..",
+".SEEEE.R.EEEES..",
+".SEEER.E.REEES..",
+".SEER.EEE.REES..",
+".SER.EEEEE.RES..",
+".SSSSSSSSSSSSS..",
+  ], {S:'#cfd8e3', E:'#8d99a6', R:'#ef476f'}),
+};
 
-      /* ---- collectibles ---- */
-      const CO_ART = {
-        /* Admit Card — green hall ticket */
-        admitCard: makeSprite(
-          [
-            "LLLLLLLLLLLL",
-            "LWWWWWWWWWWL",
-            "LWDDWWDDDDWL",
-            "LWDDWWWWWWWL",
-            "LWWWWWDDDDWL",
-            "LWDDDDWWWWWL",
-            "LWWWWWWWWWWL",
-            "LLLLLLLLLLLL",
-          ],
-          { L: "#8fd14f", W: "#fdfdf5", D: "#2e3440" },
-        ),
+/* ---- collectibles ---- */
+const CO_ART = {
+  /* Admit Card — green hall ticket */
+  admitCard: makeSprite([
+"LLLLLLLLLLLL",
+"LWWWWWWWWWWL",
+"LWDDWWDDDDWL",
+"LWDDWWWWWWWL",
+"LWWWWWDDDDWL",
+"LWDDDDWWWWWL",
+"LWWWWWWWWWWL",
+"LLLLLLLLLLLL",
+  ], {L:'#8fd14f', W:'#fdfdf5', D:'#2e3440'}),
 
-        /* Scholarship Coin */
-        coin: makeSprite(
-          [
-            "...YYYY...",
-            ".YYYYYYYY.",
-            ".YYOOOOYY.",
-            "YYOYYYYOYY",
-            "YYOYOOYOYY",
-            "YYOYYYYOYY",
-            ".YYOOOOYY.",
-            ".YYYYYYYY.",
-            "...YYYY...",
-          ],
-          { Y: "#ffd23f", O: "#f78c2a" },
-        ),
+  /* Scholarship Coin */
+  coin: makeSprite([
+"...YYYY...",
+".YYYYYYYY.",
+".YYOOOOYY.",
+"YYOYYYYOYY",
+"YYOYOOYOYY",
+"YYOYYYYOYY",
+".YYOOOOYY.",
+".YYYYYYYY.",
+"...YYYY...",
+  ], {Y:'#ffd23f', O:'#f78c2a'}),
 
-        /* Study Notes — little blue book */
-        notes: makeSprite(
-          [
-            "BBBBBBBBBB",
-            "BWWWWWWWWB",
-            "BWDDDDDDWB",
-            "BWWWWWWWWB",
-            "BWDDDDWWWB",
-            "BWWWWWWWWB",
-            "BWDDDDDDWB",
-            "BBBBBBBBBB",
-          ],
-          { B: "#3572d6", W: "#fdfdf5", D: "#5a646f" },
-        ),
+  /* Study Notes — little blue book */
+  notes: makeSprite([
+"BBBBBBBBBB",
+"BWWWWWWWWB",
+"BWDDDDDDWB",
+"BWWWWWWWWB",
+"BWDDDDWWWB",
+"BWWWWWWWWB",
+"BWDDDDDDWB",
+"BBBBBBBBBB",
+  ], {B:'#3572d6', W:'#fdfdf5', D:'#5a646f'}),
 
-        /* Energy Drink — purple can, lightning bolt */
-        energyDrink: makeSprite(
-          [
-            ".MMMMMM.",
-            ".MSSSSM.",
-            ".MMMMMM.",
-            ".MMYYMM.",
-            ".MMYMMM.",
-            ".MYYYMM.",
-            ".MMMYMM.",
-            ".MMYYMM.",
-            ".MMMMMM.",
-            ".MMMMMM.",
-          ],
-          { M: "#9b5de5", S: "#cfd8e3", Y: "#ffd23f" },
-        ),
-      };
+  /* Energy Drink — purple can, lightning bolt */
+  energyDrink: makeSprite([
+".MMMMMM.",
+".MSSSSM.",
+".MMMMMM.",
+".MMYYMM.",
+".MMYMMM.",
+".MYYYMM.",
+".MMMYMM.",
+".MMYYMM.",
+".MMMMMM.",
+".MMMMMM.",
+  ], {M:'#9b5de5', S:'#cfd8e3', Y:'#ffd23f'}),
+};
 
-      /* wire in optional PNG overrides */
-      const SPR = {
-        studentA: spriteOr(
-          CONFIG.assets.characterPNG,
-          makeSprite(STUDENT_ROWS_A, P_STUDENT),
-        ),
-        studentB: spriteOr(
-          CONFIG.assets.characterPNG,
-          makeSprite(STUDENT_ROWS_B, P_STUDENT),
-        ),
-        studentJump: spriteOr(
-          CONFIG.assets.characterPNG,
-          makeSprite(STUDENT_ROWS_JUMP, P_STUDENT),
-        ),
-        head: CONFIG.assets.headPNG
-          ? spriteOr(CONFIG.assets.headPNG, blankCanvas())
-          : null,
-        obstacles: {},
-        collectibles: {},
-      };
-      for (const k in OB_ART)
-        SPR.obstacles[k] = spriteOr(CONFIG.assets.obstaclePNGs[k], OB_ART[k]);
-      for (const k in CO_ART)
-        SPR.collectibles[k] = spriteOr(
-          CONFIG.assets.collectiblePNGs[k],
-          CO_ART[k],
-        );
+/* wire in optional PNG overrides */
+const SPR = {
+  studentA   : spriteOr(CONFIG.assets.characterPNG, makeSprite(STUDENT_ROWS_A, P_STUDENT)),
+  studentB   : spriteOr(CONFIG.assets.characterPNG, makeSprite(STUDENT_ROWS_B, P_STUDENT)),
+  studentJump: spriteOr(CONFIG.assets.characterPNG, makeSprite(STUDENT_ROWS_JUMP, P_STUDENT)),
+  head       : CONFIG.assets.headPNG ? spriteOr(CONFIG.assets.headPNG, blankCanvas()) : null,
+  obstacles  : {}, collectibles: {},
+};
+for (const k in OB_ART) SPR.obstacles[k]    = spriteOr(CONFIG.assets.obstaclePNGs[k], OB_ART[k]);
+for (const k in CO_ART) SPR.collectibles[k] = spriteOr(CONFIG.assets.collectiblePNGs[k], CO_ART[k]);
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    5. CANVAS + WORLD SETUP
    ═══════════════════════════════════════════════════════════════ */
-      const canvas = $("#game");
-      const ctx = canvas.getContext("2d");
-      let VW = 0,
-        VH = 0,
-        DPR = 1,
-        GROUND_Y = 0;
-      let booted = false; // true after all game objects exist
+const canvas = $('#game');
+const ctx = canvas.getContext('2d');
+let VW = 0, VH = 0, DPR = 1, GROUND_Y = 0;
+let booted = false;                        // true after all game objects exist
 
-      function resize() {
-        DPR = Math.min(window.devicePixelRatio || 1, 2);
-        VW = window.innerWidth;
-        VH = window.innerHeight;
-        canvas.width = VW * DPR;
-        canvas.height = VH * DPR;
-        ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-        ctx.imageSmoothingEnabled = false;
-        GROUND_Y = VH - Math.max(56, VH * 0.14); // ground line scales with screen
-        /* keep entities glued to the (possibly moved) ground after rotation/resize */
-        if (booted) {
-          for (const o of G.obstacles) if (!o.air) o.y = GROUND_Y - o.h;
-          if (player.grounded) player.y = GROUND_Y - player.h;
-          skylineSeed = null; // rebuild skyline for new width
-        }
-      }
-      window.addEventListener("resize", resize);
-      resize();
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  VW = window.innerWidth;
+  VH = window.innerHeight;
+  canvas.width  = VW * DPR;
+  canvas.height = VH * DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.imageSmoothingEnabled = false;
+  GROUND_Y = VH - Math.max(56, VH*0.14);   // ground line scales with screen
+  /* keep entities glued to the (possibly moved) ground after rotation/resize */
+  if (booted){
+    for (const o of G.obstacles) if (!o.air) o.y = GROUND_Y - o.h;
+    if (player.grounded) player.y = GROUND_Y - player.h;
+    skylineSeed = null;                    // rebuild skyline for new width
+  }
+}
+window.addEventListener('resize', resize);
+resize();
 
-      /* optional PNG parallax backgrounds */
-      const BG_FAR = CONFIG.assets.backgroundPNGs.far
-        ? spriteOr(
-            CONFIG.assets.backgroundPNGs.far,
-            document.createElement("canvas"),
-          )
-        : null;
-      const BG_NEAR = CONFIG.assets.backgroundPNGs.near
-        ? spriteOr(
-            CONFIG.assets.backgroundPNGs.near,
-            document.createElement("canvas"),
-          )
-        : null;
+/* optional PNG parallax backgrounds */
+const BG_FAR  = CONFIG.assets.backgroundPNGs.far  ? spriteOr(CONFIG.assets.backgroundPNGs.far , document.createElement('canvas')) : null;
+const BG_NEAR = CONFIG.assets.backgroundPNGs.near ? spriteOr(CONFIG.assets.backgroundPNGs.near, document.createElement('canvas')) : null;
 
-      /* ── day/night sky ─────────────────────────────────────────────
+/* ── day/night sky ─────────────────────────────────────────────
    phase t∈[0,1): 0 dawn → .25 noon → .5 dusk → .75 midnight     */
-      const SKY_STOPS = [
-        // [t, topColor, bottomColor, isNightAmount]
-        [0.0, "#ff9e6d", "#ffd9a0", 0.1], // dawn
-        [0.15, "#7ec8ff", "#dff2ff", 0], // day
-        [0.45, "#7ec8ff", "#ffe7b0", 0], // late day
-        [0.55, "#5f4b8b", "#ff8f6d", 0.4], // dusk
-        [0.65, "#131a33", "#2a3560", 1], // night
-        [0.9, "#131a33", "#3a2f55", 1], // late night
-        [1.0, "#ff9e6d", "#ffd9a0", 0.1], // wrap to dawn
-      ];
-      function hex2rgb(h) {
-        return [
-          parseInt(h.slice(1, 3), 16),
-          parseInt(h.slice(3, 5), 16),
-          parseInt(h.slice(5, 7), 16),
-        ];
-      }
-      function mixHex(a, b, t) {
-        const A = hex2rgb(a),
-          B = hex2rgb(b);
-        return `rgb(${A.map((v, i) => Math.round(lerp(v, B[i], t))).join(",")})`;
-      }
-      function skyAt(t) {
-        for (let i = 0; i < SKY_STOPS.length - 1; i++) {
-          const [t0, top0, bot0, n0] = SKY_STOPS[i],
-            [t1, top1, bot1, n1] = SKY_STOPS[i + 1];
-          if (t >= t0 && t <= t1) {
-            const k = (t - t0) / (t1 - t0);
-            return {
-              top: mixHex(top0, top1, k),
-              bottom: mixHex(bot0, bot1, k),
-              night: lerp(n0, n1, k),
-            };
-          }
-        }
-        return { top: "#7ec8ff", bottom: "#dff2ff", night: 0 };
-      }
+const SKY_STOPS = [   // [t, topColor, bottomColor, isNightAmount]
+  [0.00, '#ff9e6d', '#ffd9a0', .1],   // dawn
+  [0.15, '#7ec8ff', '#dff2ff', 0 ],   // day
+  [0.45, '#7ec8ff', '#ffe7b0', 0 ],   // late day
+  [0.55, '#5f4b8b', '#ff8f6d', .4],   // dusk
+  [0.65, '#131a33', '#2a3560', 1 ],   // night
+  [0.90, '#131a33', '#3a2f55', 1 ],   // late night
+  [1.00, '#ff9e6d', '#ffd9a0', .1],   // wrap to dawn
+];
+function hex2rgb(h){ return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+function mixHex(a,b,t){
+  const A = hex2rgb(a), B = hex2rgb(b);
+  return `rgb(${A.map((v,i)=>Math.round(lerp(v,B[i],t))).join(',')})`;
+}
+function skyAt(t){
+  for (let i=0;i<SKY_STOPS.length-1;i++){
+    const [t0,top0,bot0,n0] = SKY_STOPS[i], [t1,top1,bot1,n1] = SKY_STOPS[i+1];
+    if (t>=t0 && t<=t1){
+      const k = (t-t0)/(t1-t0);
+      return { top:mixHex(top0,top1,k), bottom:mixHex(bot0,bot1,k), night:lerp(n0,n1,k) };
+    }
+  }
+  return { top:'#7ec8ff', bottom:'#dff2ff', night:0 };
+}
 
-      /* pre-scattered stars + clouds (deterministic-ish decorations) */
-      const stars = Array.from({ length: 70 }, () => ({
-        x: Math.random(),
-        y: Math.random() * 0.6,
-        s: rand(1, 2.4),
-        tw: rand(0, 6),
-      }));
-      const clouds = Array.from({ length: 5 }, () => ({
-        x: Math.random() * 1.4,
-        y: rand(0.08, 0.4),
-        w: rand(60, 130),
-        sp: rand(0.12, 0.3),
-      }));
+/* pre-scattered stars + clouds (deterministic-ish decorations) */
+const stars  = Array.from({length:70}, () => ({ x:Math.random(), y:Math.random()*.6, s:rand(1,2.4), tw:rand(0,6) }));
+const clouds = Array.from({length:5},  () => ({ x:Math.random()*1.4, y:rand(.08,.4), w:rand(60,130), sp:rand(.12,.3) }));
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    6. GAME STATE + ENTITIES
    ═══════════════════════════════════════════════════════════════ */
-      const G = {
-        state: "menu", // menu | playing | gameover
-        paused: false, // pauses game logic when customizer is open
-        t: 0, // run time (s)
-        speed: 0,
-        distance: 0, // world px travelled
-        score: 0,
-        hiScore: store.get("hiscore", 0),
-        hearts: 3,
-        invincible: 0, // i-frame timer
-        boost: 0, // energy-drink shield timer
-        shake: 0, // screen-shake timer
-        nextObstacle: 0,
-        nextCollect: 0,
-        nextToast: 0,
-        obstacles: [],
-        collectibles: [],
-        particles: [],
-        groundMarks: [], // dashes rolling along the ground
-      };
+const G = {
+  state: 'menu',            // menu | playing | gameover
+  t: 0,                     // run time (s)
+  speed: 0,
+  distance: 0,              // world px travelled
+  score: 0,
+  hiScore: store.get('hiscore', 0),
+  hearts: 3,
+  invincible: 0,            // i-frame timer
+  boost: 0,                 // energy-drink shield timer
+  shake: 0,                 // screen-shake timer
+  nextObstacle: 0,
+  nextCollect: 0,
+  nextToast: 0,
+  obstacles: [],
+  collectibles: [],
+  particles: [],
+  groundMarks: [],          // dashes rolling along the ground
+};
 
-      const player = {
-        x: 0,
-        y: 0,
-        vy: 0,
-        w: 42,
-        h: 63, // hitbox (sprite is 14×21 @3x)
-        grounded: true,
-        jumpsUsed: 0,
-        animT: 0,
-        reset() {
-          this.x = Math.max(50, VW * 0.12);
-          this.y = GROUND_Y - this.h;
-          this.vy = 0;
-          this.grounded = true;
-          this.jumpsUsed = 0;
-          this.animT = 0;
-        },
-        jump() {
-          const maxJumps = CONFIG.gameplay.doubleJump ? 2 : 1;
-          if (this.jumpsUsed >= maxJumps) return;
-          this.vy =
-            CONFIG.gameplay.jumpVelocity * (this.jumpsUsed === 0 ? 1 : 0.88);
-          this.grounded = false;
-          this.jumpsUsed++;
-          SFX.play("jump");
-          spawnDust(this.x + this.w / 2, GROUND_Y, 4);
-        },
-        update(dt) {
-          this.vy += CONFIG.gameplay.gravity * dt;
-          this.y += this.vy * dt;
-          if (this.y >= GROUND_Y - this.h) {
-            // landed
-            if (!this.grounded) spawnDust(this.x + this.w / 2, GROUND_Y, 6);
-            this.y = GROUND_Y - this.h;
-            this.vy = 0;
-            this.grounded = true;
-            this.jumpsUsed = 0;
-          }
-          this.animT += dt * (G.speed / 60); // run animation speeds up with game
-        },
-      };
+const player = {
+  x: 0, y: 0, vy: 0,
+  w: 42, h: 63,             // hitbox (sprite is 14×21 @3x)
+  grounded: true,
+  jumpsUsed: 0,
+  animT: 0,
+  reset(){
+    this.x = Math.max(50, VW*0.12);
+    this.y = GROUND_Y - this.h;
+    this.vy = 0; this.grounded = true; this.jumpsUsed = 0; this.animT = 0;
+  },
+  jump(){
+    const maxJumps = CONFIG.gameplay.doubleJump ? 2 : 1;
+    if (this.jumpsUsed >= maxJumps) return;
+    this.vy = CONFIG.gameplay.jumpVelocity * (this.jumpsUsed===0 ? 1 : 0.88);
+    this.grounded = false;
+    this.jumpsUsed++;
+    SFX.play('jump');
+    spawnDust(this.x + this.w/2, GROUND_Y, 4);
+  },
+  update(dt){
+    this.vy += CONFIG.gameplay.gravity * dt;
+    this.y  += this.vy * dt;
+    if (this.y >= GROUND_Y - this.h){          // landed
+      if (!this.grounded) spawnDust(this.x + this.w/2, GROUND_Y, 6);
+      this.y = GROUND_Y - this.h;
+      this.vy = 0; this.grounded = true; this.jumpsUsed = 0;
+    }
+    this.animT += dt * (G.speed/60);           // run animation speeds up with game
+  },
+};
 
-      /* obstacle catalogue: size, ground/air placement, spawn weight */
-      const OB_TYPES = [
-        { id: "paperLeak", w: 56, h: 40, air: false, weight: 3 },
-        { id: "serverCrash", w: 56, h: 42, air: false, weight: 3 },
-        { id: "postponement", w: 52, h: 40, air: false, weight: 3 },
-        { id: "ruleChange", w: 46, h: 42, air: false, weight: 2 },
-        { id: "docError", w: 56, h: 42, air: false, weight: 2 },
-        { id: "fakeNotif", w: 48, h: 38, air: true, weight: 2 }, // flies at head height
-      ];
-      const CO_TYPES = [
-        { id: "coin", w: 30, h: 28, weight: 5 },
-        { id: "notes", w: 32, h: 26, weight: 3 },
-        { id: "energyDrink", w: 26, h: 32, weight: 2 },
-        { id: "admitCard", w: 38, h: 26, weight: 1 }, // rare — restores a heart
-      ];
-      function weightedPick(list) {
-        const total = list.reduce((s, o) => s + o.weight, 0);
-        let r = Math.random() * total;
-        for (const o of list) {
-          if ((r -= o.weight) <= 0) return o;
-        }
-        return list[0];
-      }
+/* obstacle catalogue: size, ground/air placement, spawn weight */
+const OB_TYPES = [
+  { id:'paperLeak',    w:56, h:40, air:false, weight:3 },
+  { id:'serverCrash',  w:56, h:42, air:false, weight:3 },
+  { id:'postponement', w:52, h:40, air:false, weight:3 },
+  { id:'ruleChange',   w:46, h:42, air:false, weight:2 },
+  { id:'docError',     w:56, h:42, air:false, weight:2 },
+  { id:'fakeNotif',    w:48, h:38, air:true,  weight:2 },  // flies at head height
+];
+const CO_TYPES = [
+  { id:'coin',        w:30, h:28, weight:5 },
+  { id:'notes',       w:32, h:26, weight:3 },
+  { id:'energyDrink', w:26, h:32, weight:2 },
+  { id:'admitCard',   w:38, h:26, weight:1 },   // rare — restores a heart
+];
+function weightedPick(list){
+  const total = list.reduce((s,o)=>s+o.weight,0);
+  let r = Math.random()*total;
+  for (const o of list){ if ((r-=o.weight) <= 0) return o; }
+  return list[0];
+}
 
-      function spawnObstacle() {
-        // Dynamically include custom obstacles in the pool
-        const activePool = OB_TYPES.filter((o) => !o.air || G.score > 200);
+function spawnObstacle(){
+  /* built-ins + any user-made obstacles, weighted together in one pool
+     (flyers still gated behind score 200; customs are ground-based)   */
+  const builtIns = OB_TYPES.filter(o => !o.air || G.score > 200);
+  const type = weightedPick(builtIns.concat(CustomAssets.pool()));
+  const y = type.air
+    ? GROUND_Y - player.h - rand(10, 46)        // head-height flyer → must NOT jump (or double-jump over)
+    : GROUND_Y - type.h;
+  G.obstacles.push({ ...type, x: VW + 40, y, bobT: rand(0,6) });
+}
+function spawnCollectible(){
+  /* built-in collectibles + any user-made rewards, weighted together */
+  const type = weightedPick(CO_TYPES.concat(CustomAssets.rewardPool()));
+  G.collectibles.push({
+    ...type,
+    x: VW + 40,
+    y: GROUND_Y - rand(type.h + 8, 150),        // reachable with a jump
+    bobT: rand(0,6),
+  });
+}
+function spawnDust(x, y, n){
+  for (let i=0;i<n;i++) G.particles.push({
+    x, y, vx:rand(-60,20), vy:rand(-120,-20), life:rand(.25,.5), t:0, col:'#c9c19f', s:rand(2,4)
+  });
+}
+function spawnBurst(x, y, col){
+  for (let i=0;i<10;i++) G.particles.push({
+    x, y, vx:rand(-160,160), vy:rand(-220,-40), life:rand(.3,.6), t:0, col, s:rand(2,5)
+  });
+}
 
-        if (CUSTOM_ASSETS.imgObs.length > 0) {
-          activePool.push({
-            id: "customImg",
-            w: 56,
-            h: 56,
-            air: false,
-            weight: 3,
-          });
-        }
-        if (CUSTOM_ASSETS.textObs.length > 0) {
-          activePool.push({
-            id: "customText",
-            w: 70,
-            h: 46,
-            air: false,
-            weight: 3,
-          });
-        }
-
-        const type = weightedPick(activePool);
-
-        const y = type.air
-          ? GROUND_Y - player.h - rand(10, 46) // head-height flyer → must NOT jump (or double-jump over)
-          : GROUND_Y - type.h;
-
-        let obstacleData = { ...type, x: VW + 40, y, bobT: rand(0, 6) };
-
-        // Assign random custom assets if picked
-        if (type.id === "customImg") {
-          obstacleData.assetIdx = Math.floor(
-            Math.random() * CUSTOM_ASSETS.imgObs.length,
-          );
-        } else if (type.id === "customText") {
-          obstacleData.text = pick(CUSTOM_ASSETS.textObs);
-        }
-
-        G.obstacles.push(obstacleData);
-      }
-      function spawnCollectible() {
-        const type = weightedPick(CO_TYPES);
-        G.collectibles.push({
-          ...type,
-          x: VW + 40,
-          y: GROUND_Y - rand(type.h + 8, 150), // reachable with a jump
-          bobT: rand(0, 6),
-        });
-      }
-      function spawnDust(x, y, n) {
-        for (let i = 0; i < n; i++)
-          G.particles.push({
-            x,
-            y,
-            vx: rand(-60, 20),
-            vy: rand(-120, -20),
-            life: rand(0.25, 0.5),
-            t: 0,
-            col: "#c9c19f",
-            s: rand(2, 4),
-          });
-      }
-      function spawnBurst(x, y, col) {
-        for (let i = 0; i < 10; i++)
-          G.particles.push({
-            x,
-            y,
-            vx: rand(-160, 160),
-            vy: rand(-220, -40),
-            life: rand(0.3, 0.6),
-            t: 0,
-            col,
-            s: rand(2, 5),
-          });
-      }
-
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    7. HUD / TOASTS / SCREENS
    ═══════════════════════════════════════════════════════════════ */
-      const heartsEl = $("#hearts");
-      function renderHearts() {
-        heartsEl.innerHTML = "";
-        for (let i = 0; i < CONFIG.gameplay.maxHearts; i++) {
-          const h = document.createElement("div");
-          h.className = "heart" + (i < G.hearts ? "" : " lost");
-          h.innerHTML = `<svg viewBox="0 0 24 22" width="26" height="24">
+const heartsEl = $('#hearts');
+function renderHearts(){
+  heartsEl.innerHTML = '';
+  for (let i=0;i<CONFIG.gameplay.maxHearts;i++){
+    const h = document.createElement('div');
+    h.className = 'heart' + (i < G.hearts ? '' : ' lost');
+    h.innerHTML = `<svg viewBox="0 0 24 22" width="26" height="24">
       <path d="M12 21 3 12C0 9 0 4 4 2c3-1.5 6 0 8 3 2-3 5-4.5 8-3 4 2 4 7 1 10z"
-        fill="${i < G.hearts ? "#ef476f" : "#555"}" stroke="#12141d" stroke-width="2"/></svg>`;
-          heartsEl.appendChild(h);
-        }
-      }
-      let toastTimer = null;
-      function toast(msg, ms = 2600) {
-        const el = $("#toast");
-        el.textContent = msg;
-        el.classList.add("show");
-        clearTimeout(toastTimer);
-        toastTimer = setTimeout(() => el.classList.remove("show"), ms);
-      }
-      function showPanel(id) {
-        for (const p of [
-          "#menu",
-          "#gameover",
-          "#leaderboard",
-          "#customizer",
-          "#profile-setup",
-        ])
-          $(p).classList.add("hidden");
-        if (id) $(id).classList.remove("hidden");
-      }
-      function verdictFor(score) {
-        let v = CONFIG.messages.verdicts[0][1];
-        for (const [min, text] of CONFIG.messages.verdicts)
-          if (score >= min) v = text;
-        return v;
-      }
+        fill="${i < G.hearts ? '#ef476f' : '#555'}" stroke="#12141d" stroke-width="2"/></svg>`;
+    heartsEl.appendChild(h);
+  }
+}
+let toastTimer = null;
+function toast(msg, ms=2600){
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.classList.remove('show'), ms);
+}
+function showPanel(id){
+  for (const p of ['#menu','#gameover','#leaderboard','#customize','#namegate']) $(p).classList.add('hidden');
+  if (id) $(id).classList.remove('hidden');
+}
+function verdictFor(score){
+  let v = CONFIG.messages.verdicts[0][1];
+  for (const [min,text] of CONFIG.messages.verdicts) if (score >= min) v = text;
+  return v;
+}
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    8. GAME FLOW
    ═══════════════════════════════════════════════════════════════ */
-      function startGame() {
-        Object.assign(G, {
-          state: "playing",
-          paused: false,
-          t: 0,
-          speed: CONFIG.gameplay.baseSpeed,
-          distance: 0,
-          score: 0,
-          hearts: CONFIG.gameplay.maxHearts,
-          invincible: 0,
-          boost: 0,
-          shake: 0,
-          obstacles: [],
-          collectibles: [],
-          particles: [],
-          groundMarks: [],
-          nextObstacle: 1.2,
-          nextCollect: rand(...CONFIG.gameplay.collectEvery),
-          nextToast: rand(...CONFIG.gameplay.toastEvery),
-        });
-        for (let x = 0; x < VW + 80; x += rand(50, 110))
-          G.groundMarks.push({ x, w: rand(10, 26) });
-        player.reset();
-        renderHearts();
-        showPanel(null);
-        SFX.unlock();
-      }
+function startGame(){
+  Object.assign(G, {
+    state:'playing', t:0, speed:CONFIG.gameplay.baseSpeed, distance:0, score:0,
+    hearts:CONFIG.gameplay.maxHearts, invincible:0, boost:0, shake:0,
+    obstacles:[], collectibles:[], particles:[], groundMarks:[],
+    nextObstacle: 1.2,
+    nextCollect: rand(...CONFIG.gameplay.collectEvery),
+    nextToast: rand(...CONFIG.gameplay.toastEvery),
+  });
+  for (let x=0; x<VW+80; x+=rand(50,110)) G.groundMarks.push({x, w:rand(10,26)});
+  player.reset();
+  renderHearts();
+  showPanel(null);
+  $('#btn-gear').style.display = 'none';       // no customization mid-run
+  SFX.unlock();
+}
 
-      function loseHeart() {
-        if (G.invincible > 0 || G.boost > 0) return;
-        G.hearts--;
-        G.invincible = CONFIG.gameplay.invincibleTime;
-        G.shake = 0.35;
-        SFX.play("hit");
-        renderHearts();
-        spawnBurst(player.x + player.w / 2, player.y + player.h / 2, "#ef476f");
-        if (G.hearts <= 0) return gameOver();
-        toast(pick(CONFIG.messages.onHit), 2000);
-      }
+function loseHeart(){
+  if (G.invincible > 0 || G.boost > 0) return;
+  G.hearts--;
+  G.invincible = CONFIG.gameplay.invincibleTime;
+  G.shake = .35;
+  SFX.play('hit');
+  renderHearts();
+  spawnBurst(player.x + player.w/2, player.y + player.h/2, '#ef476f');
+  if (G.hearts <= 0) return gameOver();
+  toast(pick(CONFIG.messages.onHit), 2000);
+}
 
-      function gameOver() {
-        G.state = "gameover";
-        G.overAt = performance.now(); // brief lockout stops accidental restarts
-        SFX.play("gameover");
-        const s = Math.floor(G.score);
-        if (s > G.hiScore) {
-          G.hiScore = s;
-          store.set("hiscore", s);
-        }
-        $("#final-score").textContent = s;
-        $("#verdict").textContent = verdictFor(s);
-        $("#gameover-player").textContent =
-          "PLAYER: " + getDisplayName(PLAYER_NAME, PLAYER_ID);
-        $("#rank-line").textContent = "Submitting to merit list…";
-        showPanel("#gameover");
-        Leaderboard.submit(s).then((rankText) => {
-          $("#rank-line").textContent = rankText;
-        });
-      }
+function gameOver(){
+  G.state = 'gameover';
+  G.overAt = performance.now();            // brief lockout stops accidental restarts
+  SFX.play('gameover');
+  const s = Math.floor(G.score);
+  if (s > G.hiScore){ G.hiScore = s; store.set('hiscore', s); }
+  $('#final-score').textContent = s;
+  $('#verdict').textContent = verdictFor(s);
+  $('#rank-line').textContent = 'Submitting to merit list…';
+  showPanel('#gameover');
+  $('#btn-gear').style.display = '';           // customization available again
+  Leaderboard.submit(s).then(rankText => { $('#rank-line').textContent = rankText; });
+}
 
-      function collect(c) {
-        const msg = CONFIG.messages.onCollect[c.id];
-        switch (c.id) {
-          case "coin":
-            G.score += 50;
-            SFX.play("collect");
-            break;
-          case "notes":
-            G.score += 25;
-            SFX.play("collect");
-            break;
-          case "energyDrink":
-            G.boost = CONFIG.gameplay.boostTime;
-            SFX.play("collect");
-            break;
-          case "admitCard":
-            if (G.hearts < CONFIG.gameplay.maxHearts) {
-              G.hearts++;
-              renderHearts();
-              SFX.play("heart");
-            } else G.score += 100;
-            break;
-        }
-        toast(msg, 1600);
-        spawnBurst(c.x + c.w / 2, c.y + c.h / 2, "#ffd23f");
-      }
+function collect(c){
+  /* user-made rewards: flat +40 and a toast naming the reward */
+  if (c.custom){
+    G.score += 40;
+    SFX.play('collect');
+    toast(c.custom === 'text' ? `${c.ref.text} Collected! (+40)` : 'Custom Reward! (+40)', 1600);
+    spawnBurst(c.x + c.w/2, c.y + c.h/2, '#ffd23f');
+    return;
+  }
+  const msg = CONFIG.messages.onCollect[c.id];
+  switch (c.id){
+    case 'coin'       : G.score += 50; SFX.play('collect'); break;
+    case 'notes'      : G.score += 25; SFX.play('collect'); break;
+    case 'energyDrink': G.boost = CONFIG.gameplay.boostTime; SFX.play('collect'); break;
+    case 'admitCard'  :
+      if (G.hearts < CONFIG.gameplay.maxHearts){ G.hearts++; renderHearts(); SFX.play('heart'); }
+      else G.score += 100;
+      break;
+  }
+  toast(msg, 1600);
+  spawnBurst(c.x + c.w/2, c.y + c.h/2, '#ffd23f');
+}
 
-      /* AABB collision with forgiving 22% inset so near-misses feel fair */
-      function hits(a, b) {
-        const ax = a.x + a.w * 0.11,
-          aw = a.w * 0.78,
-          ay = a.y + a.h * 0.08,
-          ah = a.h * 0.86;
-        const bx = b.x + b.w * 0.11,
-          bw = b.w * 0.78,
-          by = b.y + b.h * 0.08,
-          bh = b.h * 0.86;
-        return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
-      }
+/* AABB collision with forgiving 22% inset so near-misses feel fair */
+function hits(a, b){
+  const ax = a.x + a.w*.11, aw = a.w*.78, ay = a.y + a.h*.08, ah = a.h*.86;
+  const bx = b.x + b.w*.11, bw = b.w*.78, by = b.y + b.h*.08, bh = b.h*.86;
+  return ax < bx+bw && ax+aw > bx && ay < by+bh && ay+ah > by;
+}
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    9. UPDATE — fixed-ish timestep via clamped delta for stable 60fps
    ═══════════════════════════════════════════════════════════════ */
-      function update(dt) {
-        const cfg = CONFIG.gameplay;
-        G.t += dt;
-        G.speed = Math.min(cfg.maxSpeed, cfg.baseSpeed + cfg.accelPerSec * G.t);
-        const boostMul = G.boost > 0 ? 1.25 : 1; // caffeine makes you faster too
-        const dx = G.speed * boostMul * dt;
-        G.distance += dx;
-        G.score += dx * 0.1; // 1 point per 10px
-        G.invincible = Math.max(0, G.invincible - dt);
-        G.boost = Math.max(0, G.boost - dt);
-        G.shake = Math.max(0, G.shake - dt);
+function update(dt){
+  const cfg = CONFIG.gameplay;
+  G.t += dt;
+  G.speed = Math.min(cfg.maxSpeed, cfg.baseSpeed + cfg.accelPerSec * G.t);
+  const boostMul = G.boost > 0 ? 1.25 : 1;      // caffeine makes you faster too
+  const dx = G.speed * boostMul * dt;
+  G.distance += dx;
+  G.score += dx * 0.1;                          // 1 point per 10px
+  G.invincible = Math.max(0, G.invincible - dt);
+  G.boost      = Math.max(0, G.boost - dt);
+  G.shake      = Math.max(0, G.shake - dt);
 
-        player.update(dt);
+  player.update(dt);
 
-        /* spawning — gaps tighten as speed climbs (difficulty curve) */
-        G.nextObstacle -= dt;
-        if (G.nextObstacle <= 0) {
-          spawnObstacle();
-          const diff = clamp(
-            (G.speed - cfg.baseSpeed) / (cfg.maxSpeed - cfg.baseSpeed),
-            0,
-            1,
-          );
-          G.nextObstacle = rand(
-            lerp(cfg.obstacleGapMax * 0.7, cfg.obstacleGapMin, diff),
-            lerp(cfg.obstacleGapMax, cfg.obstacleGapMin * 1.5, diff),
-          );
-        }
-        G.nextCollect -= dt;
-        if (G.nextCollect <= 0) {
-          spawnCollectible();
-          G.nextCollect = rand(...cfg.collectEvery);
-        }
-        G.nextToast -= dt;
-        if (G.nextToast <= 0) {
-          toast(pick(CONFIG.messages.ambient));
-          G.nextToast = rand(...cfg.toastEvery);
-        }
+  /* spawning — gaps tighten as speed climbs (difficulty curve) */
+  G.nextObstacle -= dt;
+  if (G.nextObstacle <= 0){
+    spawnObstacle();
+    const diff = clamp((G.speed - cfg.baseSpeed) / (cfg.maxSpeed - cfg.baseSpeed), 0, 1);
+    G.nextObstacle = rand(
+      lerp(cfg.obstacleGapMax*.7, cfg.obstacleGapMin, diff),
+      lerp(cfg.obstacleGapMax,    cfg.obstacleGapMin*1.5, diff)
+    );
+  }
+  G.nextCollect -= dt;
+  if (G.nextCollect <= 0){ spawnCollectible(); G.nextCollect = rand(...cfg.collectEvery); }
+  G.nextToast -= dt;
+  if (G.nextToast <= 0){ toast(pick(CONFIG.messages.ambient)); G.nextToast = rand(...cfg.toastEvery); }
 
-        /* move + cull + collide obstacles */
-        for (const o of G.obstacles) {
-          o.x -= dx;
-          if (o.air) {
-            o.bobT += dt * 4;
-            o.y += Math.sin(o.bobT) * 0.6;
-          } // flyers wobble
-          if (hits(player, o) && G.invincible === 0) {
-            if (G.boost > 0) {
-              spawnBurst(o.x + o.w / 2, o.y + o.h / 2, "#9b5de5");
-              o.dead = true;
-              G.score += 20;
-            } else loseHeart();
-          }
-        }
-        G.obstacles = G.obstacles.filter((o) => o.x + o.w > -60 && !o.dead);
+  /* move + cull + collide obstacles */
+  for (const o of G.obstacles){
+    o.x -= dx;
+    if (o.air){ o.bobT += dt*4; o.y += Math.sin(o.bobT)*.6; }   // flyers wobble
+    if (hits(player, o) && G.invincible === 0){
+      if (G.boost > 0){ spawnBurst(o.x+o.w/2, o.y+o.h/2, '#9b5de5'); o.dead = true; G.score += 20; }
+      else loseHeart();
+    }
+  }
+  G.obstacles = G.obstacles.filter(o => o.x + o.w > -60 && !o.dead);
 
-        /* collectibles */
-        for (const c of G.collectibles) {
-          c.x -= dx;
-          c.bobT += dt * 5;
-          if (hits(player, c)) {
-            collect(c);
-            c.dead = true;
-          }
-        }
-        G.collectibles = G.collectibles.filter(
-          (c) => c.x + c.w > -60 && !c.dead,
-        );
+  /* collectibles */
+  for (const c of G.collectibles){
+    c.x -= dx; c.bobT += dt*5;
+    if (hits(player, c)){ collect(c); c.dead = true; }
+  }
+  G.collectibles = G.collectibles.filter(c => c.x + c.w > -60 && !c.dead);
 
-        /* particles */
-        for (const p of G.particles) {
-          p.t += dt;
-          p.x += p.vx * dt;
-          p.y += p.vy * dt;
-          p.vy += 700 * dt;
-        }
-        G.particles = G.particles.filter((p) => p.t < p.life);
+  /* particles */
+  for (const p of G.particles){
+    p.t += dt; p.x += p.vx*dt; p.y += p.vy*dt; p.vy += 700*dt;
+  }
+  G.particles = G.particles.filter(p => p.t < p.life);
 
-        /* rolling ground dashes */
-        for (const m of G.groundMarks) m.x -= dx;
-        G.groundMarks = G.groundMarks.filter((m) => m.x + m.w > 0);
-        while (G.groundMarks.length < 14)
-          G.groundMarks.push({ x: VW + rand(0, 60), w: rand(10, 26) });
+  /* rolling ground dashes */
+  for (const m of G.groundMarks) m.x -= dx;
+  G.groundMarks = G.groundMarks.filter(m => m.x + m.w > 0);
+  while (G.groundMarks.length < 14) G.groundMarks.push({ x: VW + rand(0,60), w: rand(10,26) });
 
-        /* HUD */
-        $("#score").textContent = Math.floor(G.score);
-        $("#hiscore").textContent =
-          "BEST " + Math.max(G.hiScore, Math.floor(G.score));
-      }
+  /* HUD */
+  $('#score').textContent = Math.floor(G.score);
+  $('#hiscore').textContent = 'BEST ' + Math.max(G.hiScore, Math.floor(G.score));
+}
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    10. RENDER
    ═══════════════════════════════════════════════════════════════ */
-      function drawSpriteFit(s, x, y, w, h) {
-        const img = drawable(s);
-        ctx.drawImage(img, x, y, w, h);
-      }
+function drawSpriteFit(s, x, y, w, h){
+  const img = drawable(s);
+  ctx.drawImage(img, x, y, w, h);
+}
 
-      function render() {
-        const t =
-          (G.distance % CONFIG.gameplay.dayCycleDist) /
-          CONFIG.gameplay.dayCycleDist;
-        const sky = skyAt(G.state === "playing" ? t : 0.2);
+/* ── custom obstacle rendering ─────────────────────────────────
+   Uploaded images sit inside a paper card with an ink frame; text
+   obstacles render as a signboard on legs with auto-scaled type.
+   Hitboxes are the full framed rect (o.w × o.h) so collisions stay
+   consistent with the shared hits() insets.                       */
+function drawCustomObstacle(o){
+  if (o.custom === 'img'){
+    ctx.fillStyle = '#12141d';
+    ctx.fillRect(o.x-2, o.y-2, o.w+4, o.h+4);            // visible outer frame
+    ctx.fillStyle = '#f6efdf';
+    ctx.fillRect(o.x, o.y, o.w, o.h);                    // paper card
+    const img = o.ref.img;
+    if (img.complete && img.width)                       // art inset inside frame
+      ctx.drawImage(img, o.x+5, o.y+5, o.w-10, o.h-10);
+  } else {                                               // text signboard
+    const boardH = o.h - 12;                             // plank height above legs
+    ctx.fillStyle = '#5a4632';                           // wooden legs
+    ctx.fillRect(o.x + o.w*0.2,     o.y + boardH, 5, 12);
+    ctx.fillRect(o.x + o.w*0.8 - 5, o.y + boardH, 5, 12);
+    ctx.fillStyle = '#12141d';
+    ctx.fillRect(o.x-2, o.y-2, o.w+4, boardH+4);         // ink frame
+    ctx.fillStyle = '#f6efdf';
+    ctx.fillRect(o.x+1, o.y+1, o.w-2, boardH-2);         // plank face
+    ctx.fillStyle = '#ef476f';                           // red-pen lettering
+    ctx.font = `bold ${o.ref.fontSize}px 'Courier New',monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(o.ref.text, o.x + o.w/2, o.y + boardH/2 + 1);
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';  // restore canvas defaults
+  }
+}
 
-        /* screen shake */
-        ctx.save();
-        if (G.shake > 0)
-          ctx.translate(rand(-1, 1) * G.shake * 18, rand(-1, 1) * G.shake * 18);
+/* ── custom reward rendering ───────────────────────────────────
+   Image rewards get a gold frame (distinct from ink-framed
+   obstacles), emojis render plain and large, and short text
+   renders as a highlighter-yellow tag. Hitbox = c.w × c.h.      */
+function drawCustomCollectible(c, bob){
+  const y = c.y + bob;
+  if (c.custom === 'img'){
+    ctx.fillStyle = '#ffd23f';
+    ctx.fillRect(c.x-2, y-2, c.w+4, c.h+4);              // gold frame
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(c.x, y, c.w, c.h);
+    const img = c.ref.img;
+    if (img.complete && img.width)
+      ctx.drawImage(img, c.x+3, y+3, c.w-6, c.h-6);
+  } else if (c.ref.emoji){                               // emoji — no frame needed
+    ctx.font = `${c.ref.fontSize}px serif`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(c.ref.text, c.x + c.w/2, y + c.h/2 + 2);
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+  } else {                                               // word — yellow tag
+    ctx.fillStyle = '#12141d';
+    ctx.fillRect(c.x-2, y-2, c.w+4, c.h+4);
+    ctx.fillStyle = '#ffd23f';
+    ctx.fillRect(c.x, y, c.w, c.h);
+    ctx.fillStyle = '#12141d';
+    ctx.font = `bold ${c.ref.fontSize}px 'Courier New',monospace`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(c.ref.text, c.x + c.w/2, y + c.h/2 + 1);
+    ctx.textAlign = 'start'; ctx.textBaseline = 'alphabetic';
+  }
+}
 
-        /* sky gradient */
-        const grad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-        grad.addColorStop(0, sky.top);
-        grad.addColorStop(1, sky.bottom);
-        ctx.fillStyle = grad;
-        ctx.fillRect(-20, -20, VW + 40, GROUND_Y + 20);
+function render(){
+  const t = (G.distance % CONFIG.gameplay.dayCycleDist) / CONFIG.gameplay.dayCycleDist;
+  const sky = skyAt(G.state==='playing' ? t : 0.2);
 
-        /* stars fade in at night */
-        if (sky.night > 0.05) {
-          ctx.fillStyle = `rgba(255,255,255,${0.9 * sky.night})`;
-          for (const s of stars) {
-            const tw = 0.5 + 0.5 * Math.sin(G.t * 2 + s.tw);
-            ctx.globalAlpha = sky.night * tw;
-            ctx.fillRect(s.x * VW, s.y * GROUND_Y, s.s, s.s);
-          }
-          ctx.globalAlpha = 1;
-        }
+  /* screen shake */
+  ctx.save();
+  if (G.shake > 0) ctx.translate(rand(-1,1)*G.shake*18, rand(-1,1)*G.shake*18);
 
-        /* sun / moon riding the cycle */
-        const orbT = t; // 0→1 across sky
-        const orbX = lerp(
-          -40,
-          VW + 40,
-          orbT < 0.5 ? orbT * 2 : (orbT - 0.5) * 2,
-        );
-        const orbY =
-          GROUND_Y * 0.55 -
-          Math.sin((orbT < 0.5 ? orbT * 2 : (orbT - 0.5) * 2) * Math.PI) *
-            GROUND_Y *
-            0.42;
-        ctx.fillStyle = orbT < 0.5 ? "#ffd23f" : "#f5f2e0"; // sun then moon
-        ctx.beginPath();
-        ctx.arc(orbX, orbY, orbT < 0.5 ? 22 : 16, 0, 7);
-        ctx.fill();
-        if (orbT >= 0.5) {
-          // moon crater bite
-          ctx.fillStyle = sky.top;
-          ctx.beginPath();
-          ctx.arc(orbX - 7, orbY - 5, 12, 0, 7);
-          ctx.fill();
-        }
+  /* sky gradient */
+  const grad = ctx.createLinearGradient(0,0,0,GROUND_Y);
+  grad.addColorStop(0, sky.top);
+  grad.addColorStop(1, sky.bottom);
+  ctx.fillStyle = grad;
+  ctx.fillRect(-20,-20,VW+40,GROUND_Y+20);
 
-        /* clouds drift (day) */
-        ctx.fillStyle = `rgba(255,255,255,${0.85 * (1 - sky.night * 0.8)})`;
-        for (const c of clouds) {
-          c.x -=
-            ((c.sp * (G.state === "playing" ? G.speed : 60)) / VW) *
-            (1 / 60) *
-            0.2;
-          if (c.x < -0.3) c.x = 1.3;
-          const cx = c.x * VW,
-            cy = c.y * GROUND_Y;
-          ctx.fillRect(cx, cy, c.w, 12);
-          ctx.fillRect(cx + c.w * 0.15, cy - 8, c.w * 0.55, 10);
-        }
+  /* stars fade in at night */
+  if (sky.night > 0.05){
+    ctx.fillStyle = `rgba(255,255,255,${.9*sky.night})`;
+    for (const s of stars){
+      const tw = .5 + .5*Math.sin(G.t*2 + s.tw);
+      ctx.globalAlpha = sky.night * tw;
+      ctx.fillRect(s.x*VW, s.y*GROUND_Y, s.s, s.s);
+    }
+    ctx.globalAlpha = 1;
+  }
 
-        /* optional PNG parallax layers */
-        if (BG_FAR) tileLayer(BG_FAR, 0.25, GROUND_Y);
-        if (BG_NEAR) tileLayer(BG_NEAR, 0.55, GROUND_Y);
+  /* sun / moon riding the cycle */
+  const orbT = t;                                // 0→1 across sky
+  const orbX = lerp(-40, VW+40, orbT<0.5 ? orbT*2 : (orbT-0.5)*2);
+  const orbY = GROUND_Y*0.55 - Math.sin((orbT<0.5?orbT*2:(orbT-0.5)*2)*Math.PI)*GROUND_Y*0.42;
+  ctx.fillStyle = orbT < 0.5 ? '#ffd23f' : '#f5f2e0';   // sun then moon
+  ctx.beginPath(); ctx.arc(orbX, orbY, orbT<0.5?22:16, 0, 7); ctx.fill();
+  if (orbT >= 0.5){                              // moon crater bite
+    ctx.fillStyle = sky.top;
+    ctx.beginPath(); ctx.arc(orbX-7, orbY-5, 12, 0, 7); ctx.fill();
+  }
 
-        /* far skyline of "exam centers" (procedural, parallax) */
-        drawSkyline(sky);
+  /* clouds drift (day) */
+  ctx.fillStyle = `rgba(255,255,255,${.85*(1-sky.night*.8)})`;
+  for (const c of clouds){
+    c.x -= (c.sp * (G.state==='playing'?G.speed:60) / VW) * (1/60) * .2;
+    if (c.x < -0.3) c.x = 1.3;
+    const cx = c.x*VW, cy = c.y*GROUND_Y;
+    ctx.fillRect(cx, cy, c.w, 12);
+    ctx.fillRect(cx+c.w*.15, cy-8, c.w*.55, 10);
+  }
 
-        /* ground */
-        ctx.fillStyle = mixHex("#8a6f47", "#3c3550", sky.night); // dirt darkens at night
-        ctx.fillRect(-20, GROUND_Y, VW + 40, VH - GROUND_Y + 20);
-        ctx.fillStyle = mixHex("#a98c5b", "#524a6e", sky.night);
-        ctx.fillRect(-20, GROUND_Y, VW + 40, 6);
-        ctx.fillStyle = "rgba(0,0,0,.25)";
-        for (const m of G.groundMarks) ctx.fillRect(m.x, GROUND_Y + 14, m.w, 3);
+  /* optional PNG parallax layers */
+  if (BG_FAR ) tileLayer(BG_FAR , 0.25, GROUND_Y);
+  if (BG_NEAR) tileLayer(BG_NEAR, 0.55, GROUND_Y);
 
-        /* collectibles (bobbing) */
-        for (const c of G.collectibles) {
-          const bob = Math.sin(c.bobT) * 4;
-          drawSpriteFit(SPR.collectibles[c.id], c.x, c.y + bob, c.w, c.h);
-        }
+  /* far skyline of "exam centers" (procedural, parallax) */
+  drawSkyline(sky);
 
-        /* obstacles */
-        for (const o of G.obstacles) {
-          if (o.id === "customImg") {
-            // Draw bordered frame for custom images
-            ctx.fillStyle = "var(--paper)";
-            ctx.fillRect(o.x, o.y, o.w, o.h);
-            ctx.strokeStyle = "var(--ink)";
-            ctx.lineWidth = 4;
-            ctx.strokeRect(o.x, o.y, o.w, o.h);
-            const customImg = RUNTIME_ASSETS.imgObsImgs[o.assetIdx];
-            if (customImg && customImg.complete) {
-              drawCropped(ctx, customImg, o.x + 4, o.y + 4, o.w - 8, o.h - 8);
-            }
-          } else if (o.id === "customText") {
-            // Draw signboard for custom text
-            ctx.fillStyle = "var(--marker)";
-            ctx.fillRect(o.x, o.y, o.w, o.h);
-            ctx.strokeStyle = "var(--ink)";
-            ctx.lineWidth = 4;
-            ctx.strokeRect(o.x, o.y, o.w, o.h);
-            ctx.fillStyle = "var(--ink)";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            const fontSize = Math.min(18, (o.w - 8) / (o.text.length * 0.6));
-            ctx.font = `bold ${fontSize}px var(--hud-font)`;
-            ctx.fillText(o.text, o.x + o.w / 2, o.y + o.h / 2);
-          } else {
-            drawSpriteFit(SPR.obstacles[o.id], o.x, o.y, o.w, o.h);
-          }
-        }
+  /* ground */
+  ctx.fillStyle = mixHex('#8a6f47', '#3c3550', sky.night);   // dirt darkens at night
+  ctx.fillRect(-20, GROUND_Y, VW+40, VH-GROUND_Y+20);
+  ctx.fillStyle = mixHex('#a98c5b', '#524a6e', sky.night);
+  ctx.fillRect(-20, GROUND_Y, VW+40, 6);
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  for (const m of G.groundMarks) ctx.fillRect(m.x, GROUND_Y+14, m.w, 3);
 
-        /* particles */
-        for (const p of G.particles) {
-          ctx.globalAlpha = 1 - p.t / p.life;
-          ctx.fillStyle = p.col;
-          ctx.fillRect(p.x, p.y, p.s, p.s);
-        }
-        ctx.globalAlpha = 1;
+  /* collectibles (bobbing; built-in sprites or user-made rewards) */
+  for (const c of G.collectibles){
+    const bob = Math.sin(c.bobT)*4;
+    if (c.custom) drawCustomCollectible(c, bob);
+    else drawSpriteFit(SPR.collectibles[c.id], c.x, c.y + bob, c.w, c.h);
+  }
 
-        /* player — flashes during i-frames, glows during caffeine shield */
-        const blink = G.invincible > 0 && Math.floor(G.t * 12) % 2 === 0;
-        if (!blink) {
-          if (G.boost > 0) {
-            ctx.save();
-            ctx.shadowColor = "#9b5de5";
-            ctx.shadowBlur = 18;
-          }
-          let spr;
-          if (!player.grounded) spr = SPR.studentJump;
-          else
-            spr =
-              Math.floor(player.animT) % 2 === 0 ? SPR.studentA : SPR.studentB;
+  /* obstacles (built-in sprites or user-made framed customs) */
+  for (const o of G.obstacles){
+    if (o.custom) drawCustomObstacle(o);
+    else drawSpriteFit(SPR.obstacles[o.id], o.x, o.y, o.w, o.h);
+  }
 
-          // Draw Body
-          drawSpriteFit(spr, player.x, player.y, player.w, player.h);
+  /* particles */
+  for (const p of G.particles){
+    ctx.globalAlpha = 1 - p.t/p.life;
+    ctx.fillStyle = p.col;
+    ctx.fillRect(p.x, p.y, p.s, p.s);
+  }
+  ctx.globalAlpha = 1;
 
-          // Draw Head
-          if (RUNTIME_ASSETS.headImg.complete && RUNTIME_ASSETS.headImg.src) {
-            drawCropped(
-              ctx,
-              RUNTIME_ASSETS.headImg,
-              player.x,
-              player.y - player.h * 0.1,
-              player.w,
-              player.h * 0.45,
-            );
-          } else if (SPR.head) {
-            drawSpriteFit(
-              SPR.head,
-              player.x,
-              player.y - player.h * 0.1,
-              player.w,
-              player.h * 0.45,
-            );
-          }
+  /* player — flashes during i-frames, glows during caffeine shield */
+  const blink = G.invincible > 0 && (Math.floor(G.t*12)%2===0);
+  if (!blink){
+    if (G.boost > 0){
+      ctx.save();
+      ctx.shadowColor = '#9b5de5'; ctx.shadowBlur = 18;
+    }
+    let spr;
+    if (!player.grounded) spr = SPR.studentJump;
+    else spr = (Math.floor(player.animT)%2===0) ? SPR.studentA : SPR.studentB;
+    drawSpriteFit(spr, player.x, player.y, player.w, player.h);
+    if (SPR.head) drawSpriteFit(SPR.head, player.x, player.y - player.h*0.1, player.w, player.h*0.45);
+    /* user-uploaded head: covers the pixel head, positioned relative to
+       player.x/y so it stays attached through run + jump frames */
+    const ch = CustomAssets.headImg;
+    if (ch && ch.complete && ch.width){
+      const hs = player.w * 0.64;                        // head square size
+      const hx = player.x + player.w * 0.10;
+      const hy = player.y - hs * 0.12;
+      ctx.fillStyle = '#12141d';
+      ctx.fillRect(hx-2, hy-2, hs+4, hs+4);              // thin ink frame
+      ctx.drawImage(ch, hx, hy, hs, hs);
+    }
+    if (G.boost > 0) ctx.restore();
+  }
+  /* shadow under player */
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  const airK = clamp((GROUND_Y - (player.y+player.h)) / 160, 0, 1);
+  ctx.beginPath();
+  ctx.ellipse(player.x+player.w/2, GROUND_Y+8, lerp(20,10,airK), 4, 0, 0, 7);
+  ctx.fill();
 
-          if (G.boost > 0) ctx.restore();
-        }
-        /* shadow under player */
-        ctx.fillStyle = "rgba(0,0,0,.25)";
-        const airK = clamp((GROUND_Y - (player.y + player.h)) / 160, 0, 1);
-        ctx.beginPath();
-        ctx.ellipse(
-          player.x + player.w / 2,
-          GROUND_Y + 8,
-          lerp(20, 10, airK),
-          4,
-          0,
-          0,
-          7,
-        );
-        ctx.fill();
+  ctx.restore();
 
-        ctx.restore();
+  /* day/night label */
+  $('#phase').textContent = G.state==='playing'
+    ? (sky.night > .5 ? '🌙 NIGHT SHIFT STUDYING' : '☀ MORNING EXAM SLOT') : '';
+}
 
-        /* day/night label */
-        $("#phase").textContent =
-          G.state === "playing"
-            ? sky.night > 0.5
-              ? "🌙 NIGHT SHIFT STUDYING"
-              : "☀ MORNING EXAM SLOT"
-            : "";
-      }
+/* tiled scrolling PNG background layer */
+function tileLayer(sprite, parallax, baseY){
+  const img = drawable(sprite);
+  if (!img.width) return;
+  const scale = (GROUND_Y*0.6) / img.height;
+  const w = img.width*scale, h = img.height*scale;
+  let off = -((G.distance*parallax) % w);
+  for (let x=off; x<VW; x+=w) ctx.drawImage(img, x, baseY-h, w, h);
+}
 
-      /* tiled scrolling PNG background layer */
-      function tileLayer(sprite, parallax, baseY) {
-        const img = drawable(sprite);
-        if (!img.width) return;
-        const scale = (GROUND_Y * 0.6) / img.height;
-        const w = img.width * scale,
-          h = img.height * scale;
-        let off = -((G.distance * parallax) % w);
-        for (let x = off; x < VW; x += w)
-          ctx.drawImage(img, x, baseY - h, w, h);
-      }
+/* procedural silhouette skyline with lit windows at night */
+let skylineSeed = null;
+function drawSkyline(sky){
+  if (!skylineSeed || skylineSeed.vw !== VW){
+    skylineSeed = { vw: VW, blocks: [] };
+    let x = 0;
+    while (x < VW*1.3){
+      const w = rand(50,110), h = rand(40, GROUND_Y*0.35);
+      skylineSeed.blocks.push({x, w, h, win: Math.random()});
+      x += w + rand(8,30);
+    }
+  }
+  const par = (G.distance*0.15) % (VW*1.3);
+  ctx.fillStyle = mixHex('#b9c7d6', '#1c2340', sky.night);
+  for (const b of skylineSeed.blocks){
+    let bx = b.x - par; if (bx < -b.w) bx += VW*1.3;
+    ctx.fillRect(bx, GROUND_Y-b.h, b.w, b.h);
+    if (sky.night > .4){                        // windows glow at night
+      ctx.fillStyle = `rgba(255,210,63,${.7*sky.night})`;
+      for (let wy=GROUND_Y-b.h+8; wy<GROUND_Y-10; wy+=14)
+        for (let wx=bx+6; wx<bx+b.w-8; wx+=16)
+          if (((wx*wy + b.win*97)|0) % 3 === 0) ctx.fillRect(wx, wy, 5, 6);
+      ctx.fillStyle = mixHex('#b9c7d6', '#1c2340', sky.night);
+    }
+  }
+}
 
-      /* procedural silhouette skyline with lit windows at night */
-      let skylineSeed = null;
-      function drawSkyline(sky) {
-        if (!skylineSeed || skylineSeed.vw !== VW) {
-          skylineSeed = { vw: VW, blocks: [] };
-          let x = 0;
-          while (x < VW * 1.3) {
-            const w = rand(50, 110),
-              h = rand(40, GROUND_Y * 0.35);
-            skylineSeed.blocks.push({ x, w, h, win: Math.random() });
-            x += w + rand(8, 30);
-          }
-        }
-        const par = (G.distance * 0.15) % (VW * 1.3);
-        ctx.fillStyle = mixHex("#b9c7d6", "#1c2340", sky.night);
-        for (const b of skylineSeed.blocks) {
-          let bx = b.x - par;
-          if (bx < -b.w) bx += VW * 1.3;
-          ctx.fillRect(bx, GROUND_Y - b.h, b.w, b.h);
-          if (sky.night > 0.4) {
-            // windows glow at night
-            ctx.fillStyle = `rgba(255,210,63,${0.7 * sky.night})`;
-            for (let wy = GROUND_Y - b.h + 8; wy < GROUND_Y - 10; wy += 14)
-              for (let wx = bx + 6; wx < bx + b.w - 8; wx += 16)
-                if (((wx * wy + b.win * 97) | 0) % 3 === 0)
-                  ctx.fillRect(wx, wy, 5, 6);
-            ctx.fillStyle = mixHex("#b9c7d6", "#1c2340", sky.night);
-          }
-        }
-      }
-
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    11. MAIN LOOP — requestAnimationFrame, delta clamped to avoid
        tunnelling after tab-switches; smooth on 60/120Hz displays.
    ═══════════════════════════════════════════════════════════════ */
-      let last = performance.now();
-      function frame(now) {
-        const dt = Math.min((now - last) / 1000, 1 / 30);
-        last = now;
-        // Pause updates if customizer is open
-        if (G.state === "playing" && !G.paused) update(dt);
-        render();
-        requestAnimationFrame(frame);
-      }
-      requestAnimationFrame(frame);
+let last = performance.now();
+function frame(now){
+  const dt = Math.min((now - last)/1000, 1/30);
+  last = now;
+  if (G.state === 'playing') update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    12. INPUT — keyboard, mouse, touch. One handler to rule them all.
    ═══════════════════════════════════════════════════════════════ */
-      function primaryAction() {
-        SFX.unlock();
-        if (G.paused) return; // Disallow jumping when settings are open
+/* true while a blocking overlay (leaderboard / customization / name form) is on screen */
+const overlayOpen = () =>
+  !$('#leaderboard').classList.contains('hidden') ||
+  !$('#customize').classList.contains('hidden') ||
+  !$('#namegate').classList.contains('hidden');
 
-        if (G.state === "playing") player.jump();
-        else if (
-          G.state === "menu" &&
-          $("#leaderboard").classList.contains("hidden") &&
-          $("#customizer").classList.contains("hidden") &&
-          $("#profile-setup").classList.contains("hidden")
-        )
-          startGame();
-        else if (
-          G.state === "gameover" &&
-          $("#leaderboard").classList.contains("hidden") &&
-          $("#customizer").classList.contains("hidden") &&
-          performance.now() - (G.overAt || 0) > 600
-        )
-          startGame(); // 0.6s grace
-      }
-      window.addEventListener("keydown", (e) => {
-        if (e.code === "Space" || e.code === "ArrowUp") {
-          e.preventDefault(); // stop page scroll
-          if (!e.repeat) primaryAction();
-        }
-      });
-      /* pointerdown covers mouse + touch + pen; ignore clicks on buttons */
-      window.addEventListener("pointerdown", (e) => {
-        if (e.target.closest("button") || e.target.closest("input")) return;
-        primaryAction();
-      });
+function primaryAction(){
+  SFX.unlock();
+  if (G.state === 'playing')  player.jump();
+  else if (G.state === 'menu' && !overlayOpen()) startGame();
+  else if (G.state === 'gameover'
+        && !overlayOpen()
+        && performance.now() - (G.overAt||0) > 600) startGame();   // 0.6s grace
+}
+window.addEventListener('keydown', e => {
+  if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;  // typing in a panel field
+  if (e.code === 'Space' || e.code === 'ArrowUp'){
+    e.preventDefault();                          // stop page scroll
+    if (!e.repeat) primaryAction();
+  }
+});
+/* pointerdown covers mouse + touch + pen; ignore clicks on buttons */
+window.addEventListener('pointerdown', e => {
+  if (e.target.closest('button')) return;
+  primaryAction();
+});
 
-      /* buttons */
-      $("#btn-start").addEventListener("click", startGame);
-      $("#btn-retry").addEventListener("click", startGame);
-      $("#btn-lb").addEventListener("click", () => Leaderboard.open());
-      $("#btn-lb2").addEventListener("click", () => Leaderboard.open());
-      $("#btn-close-lb").addEventListener("click", () => {
-        showPanel(G.state === "gameover" ? "#gameover" : "#menu");
-      });
+/* buttons */
+$('#btn-start').addEventListener('click', startGame);
+$('#btn-retry').addEventListener('click', startGame);
+$('#btn-lb' ).addEventListener('click', () => Leaderboard.open());
+$('#btn-lb2').addEventListener('click', () => Leaderboard.open());
+$('#btn-close-lb').addEventListener('click', () => {
+  showPanel(G.state === 'gameover' ? '#gameover' : '#menu');
+});
 
-      /* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════
    13. LEADERBOARD — local always; Supabase when configured.
+       Anonymous UUID identity, upsert best score, top-100 + rank.
    ═══════════════════════════════════════════════════════════════ */
-      const Leaderboard = (() => {
-        const sb = CONFIG.supabase;
-        const enabled = !!(sb.url && sb.anonKey);
-        const headers = enabled
-          ? {
-              apikey: sb.anonKey,
-              Authorization: "Bearer " + sb.anonKey,
-              "Content-Type": "application/json",
-            }
-          : null;
-        const api = (path) => `${sb.url}/rest/v1/${sb.table}${path}`;
+const Leaderboard = (() => {
+  const sb = CONFIG.supabase;
+  const enabled = !!(sb.url && sb.anonKey);
+  const headers = enabled ? {
+    'apikey': sb.anonKey,
+    'Authorization': 'Bearer ' + sb.anonKey,
+    'Content-Type': 'application/json',
+  } : null;
+  const api = path => `${sb.url}/rest/v1/${sb.table}${path}`;
 
-        function localScores() {
-          return store.get("local_scores", []);
-        }
-        function saveLocal(score) {
-          const list = localScores();
-          list.push({
-            score,
-            date: new Date().toISOString().slice(0, 10),
-            name: PLAYER_NAME,
-            id: PLAYER_ID,
-          });
-          list.sort((a, b) => b.score - a.score);
-          store.set("local_scores", list.slice(0, 100));
-        }
+  /* ---- local persistence ---- */
+  function localScores(){ return store.get('local_scores', []); }
+  function saveLocal(score){
+    const list = localScores();
+    list.push({ score, date: new Date().toISOString().slice(0,10) });
+    list.sort((a,b) => b.score - a.score);
+    store.set('local_scores', list.slice(0,100));
+  }
 
-        async function upsertRemote(score) {
-          const best = store.get("remote_best", 0);
-          if (score <= best) return;
-          await fetch(api(""), {
-            method: "POST",
-            headers: { ...headers, Prefer: "resolution=merge-duplicates" },
-            body: JSON.stringify({
-              player_id: PLAYER_ID,
-              name: PLAYER_NAME,
-              score,
-              updated_at: new Date().toISOString(),
-            }),
-          });
-          store.set("remote_best", score);
-        }
-        async function fetchTop100() {
-          const r = await fetch(
-            api("?select=player_id,name,score&order=score.desc&limit=100"),
-            { headers },
-          );
-          if (!r.ok) throw new Error("fetch failed");
-          return r.json();
-        }
-        async function fetchRank(score) {
-          const r = await fetch(api(`?select=player_id&score=gt.${score}`), {
-            headers: { ...headers, Prefer: "count=exact", Range: "0-0" },
-          });
-          const range = r.headers.get("content-range");
-          const total = range ? parseInt(range.split("/")[1], 10) : NaN;
-          return isNaN(total) ? null : total + 1;
-        }
+  /* ---- remote (Supabase REST) ---- */
+  async function upsertRemote(score){
+    const best = store.get('remote_best', 0);
+    if (score <= best) return;                   // only push improvements
+    await fetch(api(''), {
+      method: 'POST',
+      headers: { ...headers, 'Prefer': 'resolution=merge-duplicates' },
+      body: JSON.stringify({ player_id: PLAYER_ID, name: PLAYER_NAME, score,
+                             updated_at: new Date().toISOString() }),
+    });
+    store.set('remote_best', score);
+  }
+  async function fetchTop20(){
+    const r = await fetch(api('?select=player_id,name,score&order=score.desc&limit=20'), { headers });
+    if (!r.ok) throw new Error('fetch failed');
+    return r.json();
+  }
+  /* latest globally registered players (newest first) — registered_at is
+     set once by the DB default at insert and never sent on updates, so
+     score submits and renames don't bump anyone up this list */
+  async function fetchNewest(){
+    const r = await fetch(api('?select=player_id,name,registered_at&order=registered_at.desc&limit=20'), { headers });
+    if (!r.ok) throw new Error('fetch failed');
+    return r.json();
+  }
+  async function fetchRank(score){
+    const r = await fetch(api(`?select=player_id&score=gt.${score}`), {
+      headers: { ...headers, 'Prefer': 'count=exact', 'Range': '0-0' },
+    });
+    const range = r.headers.get('content-range');           // "0-0/N"
+    const total = range ? parseInt(range.split('/')[1], 10) : NaN;
+    return isNaN(total) ? null : total + 1;
+  }
 
-        async function submit(score) {
-          saveLocal(score);
-          if (!enabled)
-            return `Saved locally as ${PLAYER_NAME}. (Global list not configured)`;
-          try {
-            await upsertRemote(score);
-            const rank = await fetchRank(
-              Math.max(score, store.get("remote_best", 0)),
-            );
-            return rank
-              ? `Global rank: #${rank} as ${PLAYER_NAME}`
-              : `Score submitted as ${PLAYER_NAME}`;
-          } catch (e) {
-            return `Offline — saved locally as ${PLAYER_NAME}.`;
-          }
-        }
+  /* ---- public API ---- */
+  async function submit(score){
+    saveLocal(score);
+    if (!enabled) return `Saved locally as ${PLAYER_NAME}. (Global list not configured)`;
+    try{
+      await upsertRemote(score);
+      const rank = await fetchRank(Math.max(score, store.get('remote_best', 0)));
+      return rank ? `Global rank: #${rank} as ${PLAYER_NAME}` : `Score submitted as ${PLAYER_NAME}`;
+    }catch(e){
+      return `Offline — saved locally as ${PLAYER_NAME}.`;
+    }
+  }
 
-        function rowHTML(rank, name, score, me) {
-          return `<div class="lb-row${me ? " me" : ""}">
+  function rowHTML(rank, name, score, me){
+    return `<div class="lb-row${me?' me':''}">
       <span class="lb-rank">#${rank}</span>
-      <span class="lb-name">${name.replace(/[<>&]/g, "")}</span>
+      <span class="lb-name">${name.replace(/[<>&]/g,'')}</span>
       <span class="lb-score">${score}</span></div>`;
-        }
+  }
 
-        async function renderGlobal() {
-          const list = $("#lb-list");
-          if (!enabled) {
-            list.innerHTML = `<span class="muted">Global leaderboard not configured.<br>
+  async function renderGlobal(){
+    const list = $('#lb-list');
+    if (!enabled){
+      list.innerHTML = `<span class="muted">Global leaderboard not configured.<br>
         Add your Supabase URL + anon key in CONFIG.supabase.<br>Showing local attempts instead → tap MY ATTEMPTS.</span>`;
-            $("#lb-mine").textContent = "";
-            return;
-          }
-          list.innerHTML = '<span class="muted">Loading merit list…</span>';
-          try {
-            const rows = await fetchTop100();
-            list.innerHTML = rows.length
-              ? rows
-                  .map((r, i) =>
-                    rowHTML(
-                      i + 1,
-                      getDisplayName(r.name, r.player_id),
-                      r.score,
-                      r.player_id === PLAYER_ID,
-                    ),
-                  )
-                  .join("")
-              : '<span class="muted">No scores yet. Be the first topper!</span>';
-            const best = store.get("remote_best", 0);
-            if (best > 0) {
-              const rank = await fetchRank(best);
-              $("#lb-mine").textContent = rank
-                ? `You (${getDisplayName(PLAYER_NAME, PLAYER_ID)}) — best ${best} — rank #${rank}`
-                : "";
-            } else
-              $("#lb-mine").textContent =
-                `You are ${getDisplayName(PLAYER_NAME, PLAYER_ID)}. Play a round to enter the list!`;
-          } catch (e) {
-            list.innerHTML =
-              '<span class="muted">Could not reach the server.<br>The portal is, ironically, down.</span>';
-          }
-        }
+      $('#lb-mine').textContent = '';
+      return;
+    }
+    list.innerHTML = '<span class="muted">Loading merit list…</span>';
+    try{
+      const rows = await fetchTop20();
+      list.innerHTML = rows.length
+        ? rows.map((r,i)=>rowHTML(i+1, r.name||'Anonymous', r.score, r.player_id===PLAYER_ID)).join('')
+        : '<span class="muted">No scores yet. Be the first topper!</span>';
+      const best = store.get('remote_best', 0);
+      if (best > 0){
+        const rank = await fetchRank(best);
+        $('#lb-mine').textContent = rank ? `You (${PLAYER_NAME}) — best ${best} — rank #${rank}` : '';
+      } else $('#lb-mine').textContent = `You are ${PLAYER_NAME}. Play a round to enter the list!`;
+    }catch(e){
+      list.innerHTML = '<span class="muted">Could not reach the server.<br>The portal is, ironically, down.</span>';
+    }
+  }
 
-        function renderLocal() {
-          const rows = localScores();
-          $("#lb-list").innerHTML = rows.length
-            ? rows
-                .map((r, i) =>
-                  rowHTML(
-                    i + 1,
-                    getDisplayName(r.name || PLAYER_NAME, r.id || PLAYER_ID),
-                    r.score,
-                    false,
-                  ),
-                )
-                .join("")
-            : '<span class="muted">No attempts yet. The exam awaits.</span>';
-          $("#lb-mine").textContent =
-            `Anonymous ID: ${PLAYER_ID.slice(0, 8)}… (stored locally)`;
-        }
+  function renderLocal(){
+    const rows = localScores();
+    $('#lb-list').innerHTML = rows.length
+      ? rows.map((r,i)=>rowHTML(i+1, r.date, r.score, false)).join('')
+      : '<span class="muted">No attempts yet. The exam awaits.</span>';
+    $('#lb-mine').textContent = `Anonymous ID: ${PLAYER_ID.slice(0,8)}… (stored locally)`;
+  }
 
-        function open() {
-          showPanel("#leaderboard");
-          setTab(enabled ? "global" : "local");
-        }
-        function setTab(which) {
-          $("#tab-global").classList.toggle("active", which === "global");
-          $("#tab-global").classList.toggle("ghost", which !== "global");
-          $("#tab-local").classList.toggle("active", which === "local");
-          $("#tab-local").classList.toggle("ghost", which !== "local");
-          which === "global" ? renderGlobal() : renderLocal();
-        }
-        $("#tab-global").addEventListener("click", () => setTab("global"));
-        $("#tab-local").addEventListener("click", () => setTab("local"));
+  /* newest globally registered students (or a local fallback) */
+  async function renderNewest(){
+    const list = $('#lb-list');
+    const myDate = (store.get('registered_at','') || '').slice(0,10);
+    if (!enabled){
+      list.innerHTML = rowHTML(1, `${PLAYER_NAME} — ${myDate || 'today'}`, 'NEW', true) +
+        `<span class="muted">Global registrations need the Supabase backend<br>(CONFIG.supabase). Showing this device only.</span>`;
+      $('#lb-mine').textContent = '';
+      return;
+    }
+    list.innerHTML = '<span class="muted">Loading new admissions…</span>';
+    try{
+      const rows = await fetchNewest();
+      list.innerHTML = rows.length
+        ? rows.map((r,i) => rowHTML(i+1,
+            `${r.name || 'Anonymous'} — joined ${(r.registered_at||'').slice(0,10)}`,
+            'NEW', r.player_id === PLAYER_ID)).join('')
+        : '<span class="muted">No admissions yet. Be the first!</span>';
+      $('#lb-mine').textContent = myDate ? `You registered on ${myDate}` : '';
+    }catch(e){
+      list.innerHTML = '<span class="muted">Could not reach the server.<br>Admissions office is closed.</span>';
+    }
+  }
 
-        return { submit, open };
-      })();
+  function open(){
+    showPanel('#leaderboard');
+    setTab(enabled ? 'global' : 'local');
+  }
+  /* three tabs: score ranking · newest registrations · local attempts */
+  function setTab(which){
+    for (const [id, key] of [['#tab-global','global'], ['#tab-new','new'], ['#tab-local','local']]){
+      $(id).classList.toggle('active', which === key);
+      $(id).classList.toggle('ghost',  which !== key);
+    }
+    if (which === 'global') renderGlobal();
+    else if (which === 'new') renderNewest();
+    else renderLocal();
+  }
+  $('#tab-global').addEventListener('click', ()=>setTab('global'));
+  $('#tab-new'   ).addEventListener('click', ()=>setTab('new'));
+  $('#tab-local' ).addEventListener('click', ()=>setTab('local'));
 
-      /* ═══════════════════════════════════════════════════════════════
-   14. ASSET MANAGER UI LOGIC
+  /* push the player onto the remote list — called at registration and after
+     a rename. Sends score 0 for brand-new players so they appear in NEW
+     STUDENTS immediately; registered_at is filled by the DB default on
+     insert and intentionally never sent, so it's preserved forever. */
+  async function register(){
+    if (!enabled) return;
+    const best = store.get('remote_best', 0);
+    try{
+      await fetch(api(''), {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify({ player_id: PLAYER_ID, name: PLAYER_NAME, score: best,
+                               updated_at: new Date().toISOString() }),
+      });
+    }catch(e){ /* offline — next score submit will carry the new name */ }
+  }
+
+  /* export leaderboard data to a downloadable JSON file: identity, local
+     attempts, global Top 20, and newest registrations (when reachable) */
+  async function exportData(){
+    const data = {
+      exported_at : new Date().toISOString(),
+      me : { player_id: PLAYER_ID, name: PLAYER_NAME,
+             best: store.get('hiscore', 0),
+             registered_at: store.get('registered_at', null) },
+      local_attempts  : localScores(),
+      global_top20    : [],
+      newest_students : [],
+      note : enabled ? 'Global data included.' : 'Supabase not configured — local data only.',
+    };
+    if (enabled){
+      try{ data.global_top20    = await fetchTop20();  }catch(e){}
+      try{ data.newest_students = await fetchNewest(); }catch(e){}
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'exam-chaos-leaderboard.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);  // no leaked object URLs
+    toast('Leaderboard data downloaded.', 1800);
+  }
+  $('#btn-export').addEventListener('click', exportData);
+
+  return { submit, open, register };
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   14. CUSTOM ASSETS — user head image, uploaded image obstacles,
+       and text obstacles. All persisted as data-URLs / strings in
+       localStorage (via the existing `store` helper) and restored
+       on load. Also drives the ⚙ CUSTOMIZATION asset-manager panel.
    ═══════════════════════════════════════════════════════════════ */
-      // Tab Switching
-      function switchAssetTab(targetId) {
-        ["#tab-profile", "#tab-head", "#tab-img-obs", "#tab-txt-obs"].forEach(
-          (id) => {
-            $(id).classList.remove("active");
-            $(id).classList.add("ghost");
-          },
-        );
-        ["#sec-profile", "#sec-head", "#sec-img-obs", "#sec-txt-obs"].forEach(
-          (id) => {
-            $(id).classList.remove("active");
-          },
-        );
-        $(`#tab-${targetId}`).classList.add("active");
-        $(`#tab-${targetId}`).classList.remove("ghost");
-        $(`#sec-${targetId}`).classList.add("active");
-      }
-      $("#tab-profile").addEventListener("click", () => {
-        switchAssetTab("profile");
-        $("#disp-profile-name").textContent = PLAYER_NAME;
-        $("#change-name-group").style.display = "none";
-        $("#change-name-error").style.display = "none";
-        $("#btn-change-name").style.display = "inline-block";
-      });
-      $("#tab-head").addEventListener("click", () => switchAssetTab("head"));
-      $("#tab-img-obs").addEventListener("click", () =>
-        switchAssetTab("img-obs"),
-      );
-      $("#tab-txt-obs").addEventListener("click", () =>
-        switchAssetTab("txt-obs"),
-      );
+const CustomAssets = (() => {
+  const K = { head:'custom_head', imgs:'custom_img_obstacles', texts:'custom_text_obstacles',
+              rimgs:'custom_reward_imgs', rtexts:'custom_reward_texts' };
 
-      // Open Customizer
-      $("#btn-settings").addEventListener("click", () => {
-        if (G.state === "playing") G.paused = true;
-        showPanel("#customizer");
-        renderAssetGrids();
+  const state = {
+    headURL : store.get(K.head, null),   // data-URL of the cropped head
+    headImg : null,                      // decoded Image used by render()
+    imgs    : [],                        // [{url, img, w, h}] obstacle entries
+    texts   : [],                        // [{text, w, h, fontSize}] signboards
+    rimgs   : [],                        // [{url, img, w, h}] reward images
+    rtexts  : [],                        // [{text, w, h, fontSize, emoji}] reward text/emoji
+  };
 
-        if (CUSTOM_ASSETS.head) {
-          $("#current-head-img").src = CUSTOM_ASSETS.head;
-        } else {
-          $("#current-head-img").src =
-            "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs="; // empty
-        }
+  /* decode a stored data-URL into a drawable Image (cached per asset) */
+  const decode = url => { const i = new Image(); i.src = url; return i; };
 
-        // Set Profile defaults
-        $("#disp-profile-name").textContent = PLAYER_NAME;
-      });
-      // Close Customizer
-      $("#btn-close-customizer").addEventListener("click", () => {
-        if (G.state === "playing") {
-          G.paused = false;
-          showPanel(null); // return to game without panels
-        } else {
-          showPanel(G.state === "gameover" ? "#gameover" : "#menu");
-        }
-      });
+  /* fit raw image dims into an obstacle box, preserving aspect ratio,
+     then add frame padding — hitbox is the full framed size */
+  function obstacleDims(iw, ih){
+    const MAX = 52, MIN = 30, PAD = 10;
+    let w, h;
+    if (iw >= ih){ w = MAX; h = clamp(MAX*ih/iw, MIN, MAX); }
+    else         { h = MAX; w = clamp(MAX*iw/ih, MIN, MAX); }
+    return { w: Math.round(w + PAD), h: Math.round(h + PAD) };
+  }
 
-      // Change Name Logic
-      $("#btn-change-name").addEventListener("click", () => {
-        $("#change-name-group").style.display = "flex";
-        $("#change-name-input").value = PLAYER_NAME;
-        $("#btn-change-name").style.display = "none";
-      });
+  /* measure a text obstacle → signboard size + auto-scaled font so
+     short words render big and phrases shrink to fit the plank */
+  function textDims(text){
+    const MAXW = 128, PADX = 22, LEGS = 12;
+    let fs = 20;
+    ctx.font = `bold ${fs}px 'Courier New',monospace`;
+    const tw = ctx.measureText(text).width;
+    if (tw > MAXW - PADX) fs = clamp(fs * (MAXW-PADX) / tw, 9, 20);
+    ctx.font = `bold ${fs}px 'Courier New',monospace`;
+    const w = clamp(ctx.measureText(text).width + PADX, 46, MAXW);
+    return { w: Math.round(w), h: 34 + LEGS, fontSize: Math.round(fs*10)/10 };
+  }
 
-      $("#btn-confirm-name").addEventListener("click", () => {
-        const val = $("#change-name-input").value;
-        const err = validateProfileName(val);
-        if (err) {
-          $("#change-name-error").textContent = err;
-          $("#change-name-error").style.display = "block";
-        } else {
-          PLAYER_NAME = val.trim();
-          store.set("player_name", PLAYER_NAME);
-          $("#disp-profile-name").textContent = PLAYER_NAME;
-          $("#change-name-group").style.display = "none";
-          $("#change-name-error").style.display = "none";
-          $("#btn-change-name").style.display = "inline-block";
-        }
-      });
+  /* fit a reward image into a small collectible box, aspect kept */
+  function rewardImgDims(iw, ih){
+    const MAX = 30, MIN = 18, PAD = 8;
+    let w, h;
+    if (iw >= ih){ w = MAX; h = clamp(MAX*ih/iw, MIN, MAX); }
+    else         { h = MAX; w = clamp(MAX*iw/ih, MIN, MAX); }
+    return { w: Math.round(w + PAD), h: Math.round(h + PAD) };
+  }
 
-      // Reset Profile Logic
-      $("#btn-reset-profile").addEventListener("click", () => {
-        if (
-          confirm(
-            "Are you sure? This will delete your current identity and scores. You will need to register again.",
-          )
-        ) {
-          localStorage.removeItem(CONFIG.storagePrefix + "player_id");
-          localStorage.removeItem(CONFIG.storagePrefix + "player_name");
-          localStorage.removeItem(CONFIG.storagePrefix + "local_scores");
-          localStorage.removeItem(CONFIG.storagePrefix + "hiscore");
-          localStorage.removeItem(CONFIG.storagePrefix + "remote_best");
-          location.reload();
-        }
-      });
+  /* rough emoji detection (falls back on code points for old engines) */
+  function looksEmoji(t){
+    try{ return /\p{Extended_Pictographic}/u.test(t); }
+    catch(e){ return [...t].some(ch => ch.codePointAt(0) > 0x2100); }
+  }
 
-      // Head Image Upload Logic
-      $("#head-upload").addEventListener("change", (e) => {
-        if (!e.target.files.length) return;
-        // Resize to max 100x100 to save quota, it's drawn small anyway
-        resizeImageFile(e.target.files[0], 100, 100, (dataUrl) => {
-          CUSTOM_ASSETS.head = dataUrl;
-          RUNTIME_ASSETS.headImg.src = dataUrl;
-          $("#current-head-img").src = dataUrl;
-          saveCustomAssets();
-        });
-        e.target.value = "";
-      });
+  /* measure a text/emoji reward → floating tag or plain emoji size */
+  function rewardTextDims(text){
+    if (looksEmoji(text) && [...text].length <= 3)
+      return { w: 32, h: 30, fontSize: 24, emoji: true };
+    const MAXW = 104, PADX = 16;
+    let fs = 13;
+    ctx.font = `bold ${fs}px 'Courier New',monospace`;
+    const tw = ctx.measureText(text).width;
+    if (tw > MAXW - PADX) fs = clamp(fs * (MAXW-PADX) / tw, 9, 13);
+    ctx.font = `bold ${fs}px 'Courier New',monospace`;
+    const w = clamp(ctx.measureText(text).width + PADX, 30, MAXW);
+    return { w: Math.round(w), h: 24, fontSize: Math.round(fs*10)/10, emoji: false };
+  }
 
-      // Clear Head Image
-      $("#head-clear").addEventListener("click", () => {
-        CUSTOM_ASSETS.head = null;
-        RUNTIME_ASSETS.headImg.src = "";
-        $("#current-head-img").src =
-          "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-        saveCustomAssets();
-      });
+  /* downscale/crop an uploaded file → compact data-URL so unlimited
+     uploads stay within the localStorage quota.
+     mode 'cover'   = square center-crop (player head)
+     mode 'contain' = fit inside maxDim, aspect kept (obstacles)      */
+  function fileToDataURL(file, maxDim, mode){
+    return new Promise((resolve, reject) => {
+      if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) return reject(new Error('type'));
+      const fr = new FileReader();
+      fr.onerror = () => reject(new Error('read'));
+      fr.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('decode'));
+        img.onload = () => {
+          const c = document.createElement('canvas'), g = c.getContext('2d');
+          if (mode === 'cover'){
+            c.width = c.height = maxDim;
+            const s = Math.min(img.width, img.height);          // biggest centered square
+            g.drawImage(img, (img.width-s)/2, (img.height-s)/2, s, s, 0, 0, maxDim, maxDim);
+          } else {
+            const k = Math.min(1, maxDim / Math.max(img.width, img.height));
+            c.width  = Math.max(1, Math.round(img.width  * k));
+            c.height = Math.max(1, Math.round(img.height * k));
+            g.drawImage(img, 0, 0, c.width, c.height);
+          }
+          resolve(c.toDataURL('image/png'));
+        };
+        img.src = fr.result;
+      };
+      fr.readAsDataURL(file);
+    });
+  }
 
-      // Image Obstacles Upload Logic
-      $("#img-obs-upload").addEventListener("change", (e) => {
-        if (!e.target.files.length) return;
-        Array.from(e.target.files).forEach((file) => {
-          // Resize to max 150x150
-          resizeImageFile(file, 150, 150, (dataUrl) => {
-            CUSTOM_ASSETS.imgObs.push(dataUrl);
-            const img = new Image();
-            img.src = dataUrl;
-            RUNTIME_ASSETS.imgObsImgs.push(img);
-            saveCustomAssets();
-            renderAssetGrids();
-          });
-        });
-        e.target.value = "";
-      });
+  /* write-through persistence with quota check (localStorage can fill) */
+  function persist(key, value){
+    store.set(key, value);
+    const ok = JSON.stringify(store.get(key, null)) === JSON.stringify(value);
+    if (!ok) toast('Storage full — asset not saved.', 2200);
+    return ok;
+  }
 
-      // Text Obstacles Add Logic
-      $("#txt-obs-add").addEventListener("click", () => {
-        const val = $("#txt-obs-input").value.trim().toUpperCase();
-        if (val) {
-          CUSTOM_ASSETS.textObs.push(val);
-          saveCustomAssets();
-          $("#txt-obs-input").value = "";
-          renderAssetGrids();
-        }
-      });
+  /* ---- head image ---- */
+  async function setHead(file){
+    try{
+      const url = await fileToDataURL(file, 96, 'cover');
+      if (!persist(K.head, url)) return;
+      state.headURL = url;
+      state.headImg = decode(url);
+      renderPanel();
+    }catch(e){ toast('Could not read that image (PNG/JPG/WEBP only).', 2200); }
+  }
+  function clearHead(){
+    state.headURL = null; state.headImg = null;
+    persist(K.head, null);
+    renderPanel();
+  }
 
-      // Delete specific assets
-      function deleteImgObs(index) {
-        CUSTOM_ASSETS.imgObs.splice(index, 1);
-        RUNTIME_ASSETS.imgObsImgs.splice(index, 1);
-        saveCustomAssets();
-        renderAssetGrids();
-      }
-      function deleteTxtObs(index) {
-        CUSTOM_ASSETS.textObs.splice(index, 1);
-        saveCustomAssets();
-        renderAssetGrids();
-      }
+  /* ---- image obstacles / image rewards (shared entry helper) ---- */
+  function pushImgEntry(url, list, dimFn){
+    const entry = { url, img: decode(url), w: 40, h: 40 };   // safe defaults
+    const size  = () => Object.assign(entry, dimFn(entry.img.width, entry.img.height));
+    if (entry.img.complete && entry.img.width) size();       // cached data-URLs decode instantly
+    else entry.img.onload = size;
+    list.push(entry);
+  }
+  async function addImg(file){
+    try{
+      const url = await fileToDataURL(file, 128, 'contain');
+      const urls = store.get(K.imgs, []);
+      urls.push(url);
+      if (!persist(K.imgs, urls)) return;
+      pushImgEntry(url, state.imgs, obstacleDims);
+      renderPanel();
+    }catch(e){ toast('Could not read that image (PNG/JPG/WEBP only).', 2200); }
+  }
+  function removeImg(i){
+    state.imgs.splice(i, 1);
+    persist(K.imgs, state.imgs.map(e => e.url));
+    renderPanel();
+  }
 
-      // Render dynamic lists inside Asset Manager
-      function renderAssetGrids() {
-        const imgGrid = $("#img-obs-grid");
-        imgGrid.innerHTML = "";
-        CUSTOM_ASSETS.imgObs.forEach((src, idx) => {
-          const el = document.createElement("div");
-          el.className = "preview-item";
-          el.innerHTML = `<img src="${src}"><button class="del-btn" onclick="deleteImgObs(${idx})">DELETE</button>`;
-          imgGrid.appendChild(el);
-        });
+  /* ---- text obstacles ---- */
+  function addText(raw){
+    const text = raw.trim().toUpperCase().slice(0, 24);
+    if (!text) return;
+    const texts = store.get(K.texts, []);
+    texts.push(text);
+    if (!persist(K.texts, texts)) return;
+    state.texts.push({ text, ...textDims(text) });
+    renderPanel();
+  }
+  function removeText(i){
+    state.texts.splice(i, 1);
+    persist(K.texts, state.texts.map(t => t.text));
+    renderPanel();
+  }
 
-        const txtGrid = $("#txt-obs-grid");
-        txtGrid.innerHTML = "";
-        CUSTOM_ASSETS.textObs.forEach((text, idx) => {
-          const el = document.createElement("div");
-          el.className = "preview-item";
-          el.innerHTML = `<div class="signboard">${text}</div><button class="del-btn" onclick="deleteTxtObs(${idx})">DELETE</button>`;
-          txtGrid.appendChild(el);
-        });
-      }
+  /* ---- custom rewards (image / text / emoji collectibles) ---- */
+  async function addRewardImg(file){
+    try{
+      const url = await fileToDataURL(file, 96, 'contain');
+      const urls = store.get(K.rimgs, []);
+      urls.push(url);
+      if (!persist(K.rimgs, urls)) return;
+      pushImgEntry(url, state.rimgs, rewardImgDims);
+      renderPanel();
+    }catch(e){ toast('Could not read that image (PNG/JPG/WEBP only).', 2200); }
+  }
+  function removeRewardImg(i){
+    state.rimgs.splice(i, 1);
+    persist(K.rimgs, state.rimgs.map(e => e.url));
+    renderPanel();
+  }
+  function addRewardText(raw){
+    const text = raw.trim().slice(0, 24);        // keep case — emojis + "A+" etc.
+    if (!text) return;
+    const texts = store.get(K.rtexts, []);
+    texts.push(text);
+    if (!persist(K.rtexts, texts)) return;
+    state.rtexts.push({ text, ...rewardTextDims(text) });
+    renderPanel();
+  }
+  function removeRewardText(i){
+    state.rtexts.splice(i, 1);
+    persist(K.rtexts, state.rtexts.map(t => t.text));
+    renderPanel();
+  }
 
-      /* ═══════════════════════════════════════════════════════════════
-   15. BOOT
+  /* ---- spawn pools: consumed by spawnObstacle()/spawnCollectible().
+     Entries carry a `ref` (not an index) so deleting an asset never
+     breaks entities already on screen — they simply get culled.   */
+  function pool(){
+    const out = [];
+    for (const e of state.imgs)  out.push({ custom:'img',  ref:e, w:e.w, h:e.h, air:false, weight:2 });
+    for (const t of state.texts) out.push({ custom:'text', ref:t, w:t.w, h:t.h, air:false, weight:2 });
+    return out;
+  }
+  function rewardPool(){
+    const out = [];
+    for (const e of state.rimgs)  out.push({ custom:'img',  ref:e, w:e.w, h:e.h, weight:3 });
+    for (const t of state.rtexts) out.push({ custom:'text', ref:t, w:t.w, h:t.h, weight:3 });
+    return out;
+  }
+
+  /* ---- asset manager panel (⚙) ---- */
+  const els = {
+    headPrev  : $('#cz-head-preview'),
+    imgGrid   : $('#cz-img-grid'),
+    textList  : $('#cz-text-list'),
+    rimgGrid  : $('#cz-rimg-grid'),
+    rtextList : $('#cz-rtext-list'),
+  };
+  /* shared builders keep grid/chip markup in one place */
+  const thumbHTML = (e,i,label) =>
+    `<div class="cz-thumb"><img src="${e.url}" alt="">` +
+    `<button class="cz-del" data-i="${i}" aria-label="Delete ${label}">✕</button></div>`;
+  const chipHTML = (t,i,label) =>
+    `<span class="cz-chip">${t.text.replace(/[<>&]/g,'')}` +
+    `<button class="cz-del" data-i="${i}" aria-label="Delete ${label}">✕</button></span>`;
+
+  function renderPanel(){
+    els.headPrev.innerHTML = state.headURL
+      ? `<img src="${state.headURL}" alt="Current head">`
+      : `<span class="muted">Default pixel head</span>`;
+    $('#cz-head-clear').style.display = state.headURL ? '' : 'none';
+
+    els.imgGrid.innerHTML = state.imgs.length
+      ? state.imgs.map((e,i) => thumbHTML(e,i,'image obstacle')).join('')
+      : `<span class="muted">No image obstacles yet.</span>`;
+
+    els.textList.innerHTML = state.texts.length
+      ? state.texts.map((t,i) => chipHTML(t,i,'text obstacle')).join('')
+      : `<span class="muted">No text obstacles yet.</span>`;
+
+    els.rimgGrid.innerHTML = state.rimgs.length
+      ? state.rimgs.map((e,i) => thumbHTML(e,i,'reward image')).join('')
+      : `<span class="muted">No reward images yet.</span>`;
+
+    els.rtextList.innerHTML = state.rtexts.length
+      ? state.rtexts.map((t,i) => chipHTML(t,i,'reward')).join('')
+      : `<span class="muted">No text/emoji rewards yet.</span>`;
+
+    /* player name editor reflects the current registered name */
+    $('#cz-name-input').value = PLAYER_NAME;
+    $('#cz-name-hint').textContent =
+      `Shown on the global Top 20 · Roll No ${PLAYER_ID.slice(0,8).toUpperCase()}`;
+  }
+
+  /* delegated delete handlers — rebuilt innerHTML never leaks listeners */
+  els.imgGrid  .addEventListener('click', e => { const b = e.target.closest('.cz-del'); if (b) removeImg       (+b.dataset.i); });
+  els.textList .addEventListener('click', e => { const b = e.target.closest('.cz-del'); if (b) removeText      (+b.dataset.i); });
+  els.rimgGrid .addEventListener('click', e => { const b = e.target.closest('.cz-del'); if (b) removeRewardImg (+b.dataset.i); });
+  els.rtextList.addEventListener('click', e => { const b = e.target.closest('.cz-del'); if (b) removeRewardText(+b.dataset.i); });
+
+  /* uploads (hidden file inputs triggered by styled buttons) */
+  $('#cz-head-btn').addEventListener('click', () => $('#cz-head-file').click());
+  $('#cz-obs-btn') .addEventListener('click', () => $('#cz-obs-file').click());
+  $('#cz-rimg-btn').addEventListener('click', () => $('#cz-rimg-file').click());
+  $('#cz-head-file').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) setHead(f);
+    e.target.value = '';                       // allow re-selecting the same file
+  });
+  $('#cz-obs-file').addEventListener('change', e => {
+    for (const f of e.target.files) addImg(f);
+    e.target.value = '';
+  });
+  $('#cz-rimg-file').addEventListener('change', e => {
+    for (const f of e.target.files) addRewardImg(f);
+    e.target.value = '';
+  });
+  $('#cz-head-clear').addEventListener('click', clearHead);
+  $('#cz-text-add').addEventListener('click', () => {
+    addText($('#cz-text-input').value);
+    $('#cz-text-input').value = '';
+  });
+  $('#cz-text-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ addText(e.target.value); e.target.value = ''; }
+  });
+  $('#cz-rtext-add').addEventListener('click', () => {
+    addRewardText($('#cz-rtext-input').value);
+    $('#cz-rtext-input').value = '';
+  });
+  $('#cz-rtext-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter'){ addRewardText(e.target.value); e.target.value = ''; }
+  });
+
+  /* rename from inside the panel — validated, persisted, synced remotely */
+  $('#cz-name-save').addEventListener('click', () => {
+    const n = validName($('#cz-name-input').value);
+    if (!n){ toast('Name needs at least 4 letters.', 2000); return; }
+    setPlayerName(n);
+    Leaderboard.register();
+    toast(`Registered as ${n}.`, 1800);
+    renderPanel();
+  });
+
+  /* open/close — while unregistered, closing returns to the name form */
+  $('#btn-gear').addEventListener('click', () => { showPanel('#customize'); renderPanel(); });
+  $('#btn-close-cz').addEventListener('click', () =>
+    showPanel(!store.get('name_set', false) ? '#namegate'
+            : G.state === 'gameover' ? '#gameover' : '#menu'));
+
+  /* restore everything saved in previous sessions */
+  function load(){
+    if (state.headURL) state.headImg = decode(state.headURL);
+    for (const u of store.get(K.imgs,   [])) pushImgEntry(u, state.imgs,  obstacleDims);
+    for (const t of store.get(K.texts,  [])) state.texts.push({ text:t, ...textDims(t) });
+    for (const u of store.get(K.rimgs,  [])) pushImgEntry(u, state.rimgs, rewardImgDims);
+    for (const t of store.get(K.rtexts, [])) state.rtexts.push({ text:t, ...rewardTextDims(t) });
+  }
+  load();
+  renderPanel();
+
+  return { pool, rewardPool, get headImg(){ return state.headImg; } };
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   15. SOUND SETTINGS UI — wires the SOUND section of the ⚙ panel
+       to SFX.prefs. Master switch = full silent mode; volume slider
+       and one checkbox per sound event, all persisted immediately.
    ═══════════════════════════════════════════════════════════════ */
-      renderHearts();
-      $("#hiscore").textContent = "BEST " + G.hiScore;
-      player.reset();
-      /* hide tap hint on non-touch devices */
-      if (!("ontouchstart" in window)) $("#taphint").style.display = "none";
-      booted = true;
+(() => {
+  const master = $('#snd-master');
+  const vol    = $('#snd-volume');
+  const volVal = $('#snd-volume-val');
+  const wrap   = $('#snd-toggles');
+  const EVENTS = [ ['jump','Jump'], ['hit','Hit'], ['collect','Collect'],
+                   ['heart','Extra Heart'], ['gameover','Game Over'] ];
 
-      if (!PLAYER_NAME) {
-        showPanel("#profile-setup");
-        setTimeout(() => $("#profile-name-input").focus(), 100); // Auto-focus input
-      } else {
-        showPanel("#menu");
-      }
-    </script>
-  </body>
+  /* build one labelled checkbox per sound event */
+  wrap.innerHTML = EVENTS.map(([k, label]) =>
+    `<label class="cz-check"><input type="checkbox" data-snd="${k}"> ${label}</label>`).join('');
+
+  /* reflect saved prefs in the controls (also greys out rows in silent mode) */
+  function refresh(){
+    master.checked = SFX.prefs.master;
+    vol.value = Math.round(SFX.prefs.volume * 100);
+    volVal.textContent = vol.value + '%';
+    vol.disabled = !SFX.prefs.master;
+    wrap.querySelectorAll('input').forEach(i => {
+      i.checked  = SFX.prefs[i.dataset.snd] !== false;
+      i.disabled = !SFX.prefs.master;
+      i.closest('.cz-check').classList.toggle('off', !SFX.prefs.master || !i.checked);
+    });
+  }
+
+  master.addEventListener('change', () => {
+    SFX.setPref('master', master.checked);
+    refresh();
+    if (master.checked) SFX.play('collect');           // audible confirmation
+  });
+  vol.addEventListener('input', () => {
+    SFX.setPref('volume', vol.value / 100);
+    volVal.textContent = vol.value + '%';
+  });
+  vol.addEventListener('change', () => SFX.play('collect'));  // preview at new volume
+  wrap.addEventListener('change', e => {
+    const k = e.target.dataset.snd;
+    if (!k) return;
+    SFX.setPref(k, e.target.checked);
+    e.target.closest('.cz-check').classList.toggle('off', !e.target.checked);
+    if (e.target.checked) SFX.play(k);                 // preview the enabled sound
+  });
+
+  refresh();
+})();
+
+/* ═══════════════════════════════════════════════════════════════
+   16. BOOT
+   ═══════════════════════════════════════════════════════════════ */
+renderHearts();
+$('#hiscore').textContent = 'BEST ' + G.hiScore;
+player.reset();
+/* hide tap hint on non-touch devices */
+if (!('ontouchstart' in window)) $('#taphint').style.display = 'none';
+
+/* first-visit registration gate: blocks the menu until the player enters
+   a name with at least 4 letters. Their UUID (Roll No) is shown so it's
+   clear the leaderboard identity is anonymous + device-bound.          */
+$('#name-uuid').textContent = PLAYER_ID.slice(0,8).toUpperCase();
+function submitNameGate(){
+  const n = validName($('#name-input').value);
+  if (!n){ $('#name-error').textContent = 'Name must contain at least 4 letters.'; return; }
+  setPlayerName(n);
+  $('#name-error').textContent = '';
+  Leaderboard.register();                    // appears in NEW STUDENTS right away
+  showPanel('#menu');
+}
+$('#name-submit').addEventListener('click', submitNameGate);
+$('#name-input').addEventListener('keydown', e => { if (e.key === 'Enter') submitNameGate(); });
+if (!store.get('name_set', false)) showPanel('#namegate');
+
+booted = true;
+</script>
+</body>
 </html>
